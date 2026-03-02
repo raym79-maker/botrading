@@ -12,7 +12,17 @@ class BinanceClient:
         return hmac.new(self.secret_key.encode('utf-8'), params.encode('utf-8'), hashlib.sha256).hexdigest()
 
     def _get_timestamp(self):
-        return int(requests.get(f"{self.base_url}/fapi/v1/time").json()['serverTime'])
+        try:
+            response = requests.get(f"{self.base_url}/fapi/v1/time", timeout=5)
+            data = response.json()
+            if 'serverTime' in data:
+                return int(data['serverTime'])
+            else:
+                # Si no hay 'serverTime', usa tiempo local ajustado a milisegundos
+                return int(time.time() * 1000)
+        except Exception as e:
+            print(f"Error obteniendo tiempo: {e}")
+            return int(time.time() * 1000)
 
     def get_price(self, symbol="BTCUSDT"):
         try: return float(requests.get(f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}").json()['price'])
@@ -49,4 +59,5 @@ class BinanceClient:
         with open("historial_trades.csv", "a", newline='') as f:
             writer = csv.writer(f)
             if f.tell() == 0: writer.writerow(["Fecha", "Side", "Entrada", "Salida", "PNL (USDT)"])
+
             writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), side, entry, exit, round(pnl, 2)])
