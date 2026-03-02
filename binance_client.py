@@ -3,9 +3,8 @@ from datetime import datetime
 
 class BinanceClient:
     def __init__(self):
-        # Ahora el bot buscará las variables en Railway
-        self.api_key = os.getenv("Z3EtogSRw4zn4UeO01WFjfvp4sbKM1k1iT9ydSPWFkbGuoYuGFHqI6qZXl2Twuav")
-        self.secret_key = os.getenv("lVPpfFljjpIBPpb4XAJe48CXpc8PXimDncCo24xHgH68LFpJVVM4ETEe1zWRsCju")
+        self.api_key = os.getenv("API_KEY")
+        self.secret_key = os.getenv("SECRET_KEY")
         self.base_url = 'https://demo-fapi.binance.com'
 
     def _get_signature(self, params):
@@ -13,27 +12,20 @@ class BinanceClient:
 
     def _get_timestamp(self):
         try:
-            # Petición a Binance con timeout
             response = requests.get(f"{self.base_url}/fapi/v1/time", timeout=5)
-            # Verificamos si la respuesta es exitosa
             if response.status_code == 200:
                 data = response.json()
                 if 'serverTime' in data:
                     return int(data['serverTime'])
-            # Si llegamos aquí, algo salió mal con la API, usamos tiempo local
             return int(time.time() * 1000)
         except Exception:
-            # Fallback en caso de error de red
-            return int(time.time() * 1000)
-                
-        except Exception as e:
-            # Si falla la red, el timeout o cualquier otra cosa, usamos tiempo local
-            print(f"Error conectando con Binance para el timestamp: {e}")
             return int(time.time() * 1000)
 
     def get_price(self, symbol="BTCUSDT"):
-        try: return float(requests.get(f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}").json()['price'])
-        except: return 0.0
+        try: 
+            return float(requests.get(f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}").json()['price'])
+        except: 
+            return 0.0
 
     def place_order(self, symbol, side, quantity):
         params = {"symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity, "timestamp": self._get_timestamp()}
@@ -66,7 +58,4 @@ class BinanceClient:
         with open("historial_trades.csv", "a", newline='') as f:
             writer = csv.writer(f)
             if f.tell() == 0: writer.writerow(["Fecha", "Side", "Entrada", "Salida", "PNL (USDT)"])
-
             writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), side, entry, exit, round(pnl, 2)])
-
-
