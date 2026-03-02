@@ -11,19 +11,20 @@ class BinanceClient:
     def _get_signature(self, params):
         return hmac.new(self.secret_key.encode('utf-8'), params.encode('utf-8'), hashlib.sha256).hexdigest()
 
-   def _get_timestamp(self):
+    def _get_timestamp(self):
         try:
-            # Añadimos un timeout para que no se quede colgado esperando
+            # Petición a Binance con timeout
             response = requests.get(f"{self.base_url}/fapi/v1/time", timeout=5)
-            data = response.json()
-            
-            # Verificamos si realmente viene la clave 'serverTime' antes de acceder
-            if 'serverTime' in data:
-                return int(data['serverTime'])
-            else:
-                # Si la API responde pero no trae el tiempo, usamos tiempo local
-                print(f"Respuesta inesperada de Binance: {data}")
-                return int(time.time() * 1000)
+            # Verificamos si la respuesta es exitosa
+            if response.status_code == 200:
+                data = response.json()
+                if 'serverTime' in data:
+                    return int(data['serverTime'])
+            # Si llegamos aquí, algo salió mal con la API, usamos tiempo local
+            return int(time.time() * 1000)
+        except Exception:
+            # Fallback en caso de error de red
+            return int(time.time() * 1000)
                 
         except Exception as e:
             # Si falla la red, el timeout o cualquier otra cosa, usamos tiempo local
@@ -67,4 +68,5 @@ class BinanceClient:
             if f.tell() == 0: writer.writerow(["Fecha", "Side", "Entrada", "Salida", "PNL (USDT)"])
 
             writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), side, entry, exit, round(pnl, 2)])
+
 
