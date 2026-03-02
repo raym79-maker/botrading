@@ -1,0 +1,4 @@
+venv/
+__pycache__/
+historial_trades.csv
+.env
