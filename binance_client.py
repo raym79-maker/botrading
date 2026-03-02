@@ -22,9 +22,9 @@ class BinanceClient:
             return int(time.time() * 1000)
 
     def get_price(self, symbol="BTCUSDT"):
-        try: 
+        try:
             return float(requests.get(f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}").json()['price'])
-        except: 
+        except:
             return 0.0
 
     def place_order(self, symbol, side, quantity):
