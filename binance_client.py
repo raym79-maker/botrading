@@ -23,13 +23,14 @@ class BinanceClient:
         except: pass
 
     def get_indicators(self, symbol="BTCUSDT"):
-        """Intenta obtener indicadores. Si falla, devuelve al menos el precio actual."""
-        # Usamos una URL alternativa de Binance que suele estar menos saturada
-        url = f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
+        """Usa Bybit como fuente principal de velas para evitar bloqueos en Railway."""
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=100"
         try:
-            res = requests.get(url, timeout=3).json()
-            df = pd.DataFrame(res)
-            closes = df[4].astype(float) # Columna 4 es el precio de cierre
+            res = requests.get(url, timeout=5).json()
+            data = res['result']['list']
+            df = pd.DataFrame(data)
+            # Bybit v5: [0]timestamp, [1]open, [2]high, [3]low, [4]close...
+            closes = df[4].astype(float).iloc[::-1] # Invertimos para que el más reciente sea el último
             
             ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
             delta = closes.diff()
@@ -38,13 +39,23 @@ class BinanceClient:
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
             return round(rsi, 2), round(ema, 2), closes.iloc[-1]
         except:
-            # Si falla, pedimos el precio a una fuente externa para no quedar en 0.00
+            return 0.0, 0.0, self.get_price(symbol)
+
+    def get_price(self, symbol="BTCUSDT"):
+        """Respaldo triple de precio: Bybit -> Coinbase -> CryptoCompare."""
+        urls = [
+            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
+            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+            "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USDT"
+        ]
+        for url in urls:
             try:
-                r = requests.get("https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT", timeout=2).json()
-                price = float(r['result']['list'][0]['lastPrice'])
-                return 0.0, 0.0, price
-            except:
-                return 0.0, 0.0, 0.0
+                res = requests.get(url, timeout=2).json()
+                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
+                if 'data' in res: return float(res['data']['amount'])
+                if 'USDT' in res: return float(res['USDT'])
+            except: continue
+        return 0.0
 
     def get_account_status(self):
         res = self._request('GET', '/fapi/v2/account')
@@ -57,8 +68,10 @@ class BinanceClient:
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
+        headers = {'X-MBX-APIKEY': self.api_key}
         try:
-            return requests.request(method, url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
+            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
+            return requests.get(url, headers=headers, timeout=10).json()
         except: return {"error": "Error de conexión"}
 
     def place_order(self, symbol, side, quantity):
