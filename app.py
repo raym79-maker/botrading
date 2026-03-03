@@ -26,13 +26,12 @@ with st.sidebar:
     st.header("⚙️ Configuración")
     cantidad = st.number_input("CANTIDAD BTC", value=0.002, format="%.3f")
     
-    # Obtener indicadores
     rsi, ema, precio_actual = client.get_indicators()
-    st.metric("RSI (14)", f"{rsi if rsi > 0 else 'Cargando...'}")
-    st.metric("EMA (20)", f"{ema if ema > 0 else 'Cargando...'}")
+    st.metric("RSI (14)", f"{rsi if rsi > 0 else 'Buscando alternativa...'}")
+    st.metric("EMA (20)", f"{ema if ema > 0 else 'Calculando...'}")
     st.metric("BTC Precio", f"{precio_actual:,.2f} USDT")
 
-# --- GRÁFICO CON INDICADORES ---
+# --- GRÁFICO ---
 components.html(f"""
 <div style="height:450px;">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
@@ -48,25 +47,27 @@ components.html(f"""
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
-pnl_actual = 0.0
+pnl = 0.0 # FIX: Evita el error 'pnl not defined'
 
 if posicion:
     side = "LONG" if float(posicion['positionAmt']) > 0 else "SHORT"
     entry = float(posicion['entryPrice'])
     tamano = abs(float(posicion['positionAmt']))
+    
     if precio_actual > 0:
-        pnl_actual = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {'🟢' if pnl_actual >= 0 else '🔴'} {pnl_actual:,.4f} USDT")
-else:
-    # BUSCAR ENTRADA AUTOMÁTICA
-    if auto_mode and precio_actual > 0 and rsi > 0:
-        st.info("🤖 Bot buscando entrada...")
-        if rsi < 35 and precio_actual > ema:
-            client.place_order("BTCUSDT", "BUY", str(cantidad))
-            st.rerun()
-        elif rsi > 65 and precio_actual < ema:
-            client.place_order("BTCUSDT", "SELL", str(cantidad))
-            st.rerun()
+        pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.4f} USDT")
+    else:
+        st.error("⚠️ Error de conexión temporal: Precio en 0.00.")
+
+elif auto_mode and precio_actual > 0 and rsi > 0:
+    st.info("🤖 Bot analizando mercado...")
+    if rsi < 35 and precio_actual > ema:
+        client.place_order("BTCUSDT", "BUY", str(cantidad))
+        st.rerun()
+    elif rsi > 65 and precio_actual < ema:
+        client.place_order("BTCUSDT", "SELL", str(cantidad))
+        st.rerun()
 
 # --- BOTONES ---
 st.divider()
@@ -75,8 +76,10 @@ if c1.button("🟢 MANUAL LONG"): client.place_order("BTCUSDT", "BUY", str(canti
 if c2.button("🔴 MANUAL SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)) ; st.rerun()
 if c3.button("⛔ CERRAR Y REGISTRAR"):
     if posicion:
+        # Usamos el PNL calculado o 0.0 si el precio falló
+        pnl_final = pnl if precio_actual > 0 else 0.0
         client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
-        client.registrar_trade(side, entry, precio_actual, pnl_actual)
+        client.registrar_trade(side, entry, precio_actual, pnl_final)
         st.rerun()
 
 # --- HISTORIAL ---
