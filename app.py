@@ -8,7 +8,7 @@ client = BinanceClient()
 
 st.title("📈 Terminal de Trading (Demo)")
 
-# --- PANEL LATERAL (CONTROL DE RIESGO) ---
+# --- PANEL LATERAL ---
 with st.sidebar:
     st.header("Conexión")
     if not client.api_key: st.error("❌ API_KEY no configurada")
@@ -35,27 +35,25 @@ if posicion and precio_actual > 0:
     
     st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {pnl:,.2f} USDT")
     
-    # Cierre automático (Vigilancia TP/SL)
+    # Vigilancia TP/SL
     if (side=="LONG" and (0 < tp_precio <= precio_actual or 0 < sl_precio >= precio_actual)) or \
        (side=="SHORT" and (0 < tp_precio >= precio_actual or 0 < sl_precio <= precio_actual)):
         client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
         client.registrar_trade(side, entry, precio_actual, pnl)
-        st.success("Objetivo alcanzado. Posición cerrada."); time.sleep(1); st.rerun()
+        st.success("Objetivo alcanzado. Cerrando..."); time.sleep(1); st.rerun()
 else:
     st.info("Buscando señal... No hay posiciones abiertas.")
 
-# --- BOTONES DE ACCIÓN ---
+# --- BOTONES ---
 col1, col2, col3 = st.columns(3)
 if col1.button("🟢 ABRIR LONG"):
     res = client.place_order("BTCUSDT", "BUY", str(cantidad))
-    if 'error' in res: st.error(res['error'])
-    elif 'msg' in res: st.error(res['msg'])
+    if 'orderId' not in res: st.error(f"Error: {res.get('msg', 'Desconocido')}")
     st.rerun()
 
 if col2.button("🔴 ABRIR SHORT"):
     res = client.place_order("BTCUSDT", "SELL", str(cantidad))
-    if 'error' in res: st.error(res['error'])
-    elif 'msg' in res: st.error(res['msg'])
+    if 'orderId' not in res: st.error(f"Error: {res.get('msg', 'Desconocido')}")
     st.rerun()
 
 if col3.button("⛔ CERRAR Y REGISTRAR"):
