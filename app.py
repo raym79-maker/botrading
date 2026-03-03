@@ -6,15 +6,23 @@ from binance_client import BinanceClient
 st.set_page_config(page_title="Terminal Trading Pro", layout="wide")
 client = BinanceClient()
 
-st.title("📈 Terminal de Trading (DB Persistent)")
+st.title("📈 Terminal de Trading (Modo Persistente)")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
-    st.header("💰 Mi Cuenta")
+    st.header("💰 Estado de Cuenta")
     info = client.get_account_status()
-    st.metric(label="Patrimonio (Equity)", value=f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} USDT")
+    st.metric(
+        label="Patrimonio Total (Equity)", 
+        value=f"{info['equity']:,.2f} USDT", 
+        delta=f"{info['unrealized_pnl']:,.2f} USDT PNL"
+    )
+    st.write(f"**Saldo Billetera:** {info['wallet']:,.2f} USDT")
     
     st.divider()
+    if not client.db_url: st.error("⚠️ Base de Datos NO vinculada.")
+    else: st.success("✅ Base de Datos Conectada.")
+
     st.header("⚙️ Parámetros")
     cantidad = st.number_input("CANTIDAD BTC", value=0.002, format="%.3f")
     precio_actual = client.get_price("BTCUSDT")
@@ -37,13 +45,16 @@ if posicion:
         pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
         st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.4f} USDT")
         
+        # Vigilancia automática TP/SL
         if (side=="LONG" and (0 < tp_precio <= precio_actual or 0 < sl_precio >= precio_actual)) or \
            (side=="SHORT" and (0 < tp_precio >= precio_actual or 0 < sl_precio <= precio_actual)):
             client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
             client.registrar_trade(side, entry, precio_actual, pnl)
             st.rerun()
+    else:
+        st.info(f"**POSICIÓN ACTIVA: {side}** | Sincronizando precio real...")
 else:
-    st.success("Sin operaciones abiertas.")
+    st.info("Buscando señal... No hay posiciones abiertas.")
 
 # --- BOTONES ---
 col1, col2, col3 = st.columns(3)
@@ -56,15 +67,12 @@ if col3.button("⛔ CERRAR Y REGISTRAR"):
         client.registrar_trade(side, entry, precio_actual, pnl_final)
         st.rerun()
 
-# --- HISTORIAL (DESDE BASE DE DATOS) ---
-st.subheader("📋 Historial Permanente (PostgreSQL)")
-try:
-    df_historial = client.obtener_historial_db()
-    if not df_historial.empty:
-        st.table(df_historial)
-    else:
-        st.write("No hay trades registrados en la base de datos.")
-except Exception as e:
-    st.error(f"Error al conectar con la DB: {e}")
+# --- HISTORIAL PERMANENTE (POSTGRESQL) ---
+st.subheader("📋 Historial Permanente")
+historial = client.obtener_historial_db()
+if historial is not None and not historial.empty:
+    st.table(historial)
+else:
+    st.write("Esperando el primer cierre de operación para registrar en la DB.")
 
 time.sleep(2); st.rerun()
