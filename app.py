@@ -3,35 +3,46 @@ import time, pandas as pd, os
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
+# Configuración inicial
 st.set_page_config(page_title="Terminal Trading Cloud", layout="wide")
 client = BinanceClient()
 
 st.title("📈 Terminal de Trading (Cloud)")
 
-# --- PANEL LATERAL ---
+# --- PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
-    # NUEVA SECCIÓN: SALDO TOTAL
-    st.header("Mi Cuenta")
-    saldo_actual = client.get_balance()
-    st.metric("Saldo Disponible", f"{saldo_actual:,.2f} USDT")
+    st.header("💰 Mi Cuenta")
+    info = client.get_account_status()
+    st.metric(
+        label="Patrimonio Total (Equity)", 
+        value=f"{info['equity']:,.2f} USDT",
+        delta=f"{info['unrealized_pnl']:,.2f} USDT PNL"
+    )
+    st.write(f"**Saldo Billetera:** {info['wallet']:,.2f} USDT")
     
-    st.divider() # Línea divisora estética
+    st.divider()
 
-    st.header("Control de Riesgo")
+    st.header("⚙️ Parámetros")
     cantidad = st.number_input("CANTIDAD BTC", value=0.002, format="%.3f")
     
     precio_actual = client.get_price("BTCUSDT")
-    
     if precio_actual > 0:
-        valor_op = cantidad * precio_actual
-        st.info(f"Valor aproximado: {valor_op:,.2f} USDT")
+        st.info(f"Valor aprox: {(cantidad * precio_actual):,.2f} USDT")
     
     tp_precio = st.number_input("Take Profit (USDT)", value=0.0)
     sl_precio = st.number_input("Stop Loss (USDT)", value=0.0)
     st.metric("Precio Bitcoin", f"{precio_actual:,.2f} USDT")
 
-# --- GRÁFICO ---
-components.html("""<div style="height:400px;"><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({"autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart"});</script><div id="tv_chart"></div></div>""", height=400)
+# --- GRÁFICO TRADINGVIEW ---
+components.html("""
+<div style="height:400px;">
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script type="text/javascript">
+  new TradingView.widget({"autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart"});
+  </script>
+  <div id="tv_chart"></div>
+</div>
+""", height=400)
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
@@ -42,6 +53,7 @@ if posicion:
     
     if precio_actual > 0:
         pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
+        # Línea con colores 🟢/🔴 dinámicos
         st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.2f} USDT")
         
         # Vigilancia automática TP/SL
@@ -51,24 +63,27 @@ if posicion:
             client.registrar_trade(side, entry, precio_actual, pnl)
             st.rerun()
     else:
-        st.info(f"**POSICIÓN ACTIVA: {side}** | Esperando actualización de precio...")
+        st.info(f"**POSICIÓN ACTIVA: {side}** | Sincronizando precio real...")
 else:
     st.success("Sin operaciones abiertas.")
 
-# --- BOTONES ---
+# --- BOTONES DE ACCIÓN ---
 col1, col2, col3 = st.columns(3)
 if col1.button("🟢 ABRIR LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
 if col2.button("🔴 ABRIR SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
 if col3.button("⛔ CERRAR Y REGISTRAR"):
     if posicion and precio_actual > 0:
-        pnl_f = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
+        pnl_final = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
         client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
-        client.registrar_trade(side, entry, precio_actual, pnl_f)
+        client.registrar_trade(side, entry, precio_actual, pnl_final)
         st.rerun()
 
 # --- HISTORIAL ---
 st.subheader("📋 Historial de Trades")
 if os.path.exists("historial_trades.csv"):
-    st.table(pd.read_csv("historial_trades.csv").tail(10))
+    df = pd.read_csv("historial_trades.csv")
+    st.table(df.tail(10))
 
-time.sleep(2); st.rerun()
+# Actualización automática cada 2 segundos
+time.sleep(2)
+st.rerun()
