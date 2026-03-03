@@ -33,8 +33,8 @@ if posicion and precio_actual > 0:
     tamano = abs(float(posicion['positionAmt']))
     pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
 
-    st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {pnl:,.2f} USDT")
-        
+    st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.2f} USDT")
+           
     # Vigilancia TP/SL
     if (side=="LONG" and (0 < tp_precio <= precio_actual or 0 < sl_precio >= precio_actual)) or \
        (side=="SHORT" and (0 < tp_precio >= precio_actual or 0 < sl_precio <= precio_actual)):
@@ -69,5 +69,6 @@ if os.path.exists("historial_trades.csv"):
     st.table(df.tail(10))
 
 time.sleep(2); st.rerun()
+
 
 
