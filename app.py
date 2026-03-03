@@ -28,15 +28,20 @@ components.html("""<div style="height:400px;"><script type="text/javascript" src
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
+precio_actual = client.get_price("BTCUSDT")
+
 if posicion:
     side = "LONG" if float(posicion['positionAmt']) > 0 else "SHORT"
     entry = float(posicion['entryPrice'])
     tamano = abs(float(posicion['positionAmt']))
-    # Calculamos PNL solo si el precio es válido
-    pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano if precio_actual > 0 else 0.0
     
-    # Línea adaptada con colores 🟢/🔴
-    st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.2f} USDT")
+    # SOLO calculamos si el precio NO es cero
+    if precio_actual > 0:
+        pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.2f} USDT")
+    else:
+        # Si el precio es 0, mostramos un mensaje de carga en lugar de un PNL falso
+        st.info(f"**POSICIÓN ACTIVA: {side}** | Esperando actualización de precio...")
     
     # Vigilancia TP/SL
     if precio_actual > 0:
@@ -64,3 +69,4 @@ if os.path.exists("historial_trades.csv"):
     st.table(pd.read_csv("historial_trades.csv").tail(10))
 
 time.sleep(2); st.rerun()
+
