@@ -47,7 +47,7 @@ components.html(f"""
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
-pnl = 0.0 # FIX: Evita el error 'pnl not defined'
+pnl_valor = 0.0 # FIX: Definimos PNL aquí para que siempre exista
 
 if posicion:
     side = "LONG" if float(posicion['positionAmt']) > 0 else "SHORT"
@@ -55,10 +55,10 @@ if posicion:
     tamano = abs(float(posicion['positionAmt']))
     
     if precio_actual > 0:
-        pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.4f} USDT")
+        pnl_valor = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {'🟢' if pnl_valor >= 0 else '🔴'} {pnl_valor:,.4f} USDT")
     else:
-        st.error("⚠️ Error de conexión temporal: Precio en 0.00.")
+        st.error("⚠️ Precio actual no disponible. PNL pausado.")
 
 elif auto_mode and precio_actual > 0 and rsi > 0:
     st.info("🤖 Bot analizando mercado...")
@@ -72,18 +72,16 @@ elif auto_mode and precio_actual > 0 and rsi > 0:
 # --- BOTONES ---
 st.divider()
 c1, c2, c3 = st.columns(3)
-if c1.button("🟢 MANUAL LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)) ; st.rerun()
-if c2.button("🔴 MANUAL SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)) ; st.rerun()
+if c1.button("🟢 MANUAL LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
+if c2.button("🔴 MANUAL SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
 if c3.button("⛔ CERRAR Y REGISTRAR"):
     if posicion:
-        # Usamos el PNL calculado o 0.0 si el precio falló
-        pnl_final = pnl if precio_actual > 0 else 0.0
         client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
-        client.registrar_trade(side, entry, precio_actual, pnl_final)
+        client.registrar_trade(side, entry, precio_actual, pnl_valor)
         st.rerun()
 
 # --- HISTORIAL ---
-st.subheader("📋 Historial (PostgreSQL)")
+st.subheader("📋 Historial Permanente (DB)")
 df = client.obtener_historial_db()
 if df is not None: st.table(df)
 
