@@ -8,16 +8,16 @@ client = BinanceClient()
 
 st.title("📈 Terminal de Trading")
 
-# --- MODO DEBUG (BARRA LATERAL) ---
+# --- BARRA LATERAL (CONTROL) ---
 with st.sidebar:
     st.header("Estado de API")
     if not client.api_key: st.error("❌ API_KEY no detectada")
     else: st.success("✅ API_KEY cargada")
-    
+
     st.header("Control de Riesgo")
-    cantidad = st.sidebar.number_input("Cantidad BTC", value=0.002, format="%.3f")
-    tp_precio = st.sidebar.number_input("Take Profit (USDT)", value=0.0)
-    sl_precio = st.sidebar.number_input("Stop Loss (USDT)", value=0.0)
+    cantidad = st.number_input("Cantidad BTC", value=0.002, format="%.3f")
+    tp_precio = st.number_input("Take Profit (USDT)", value=0.0)
+    sl_precio = st.number_input("Stop Loss (USDT)", value=0.0)
     
     precio_actual = client.get_price("BTCUSDT")
     st.metric("Precio Mercado", f"{precio_actual:,.2f} USDT")
@@ -27,32 +27,32 @@ components.html("""<div style="height:400px;"><script type="text/javascript" src
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
-if posicion:
+if posicion and precio_actual > 0:
     side = "LONG" if float(posicion['positionAmt']) > 0 else "SHORT"
     entry = float(posicion['entryPrice'])
     tamano = abs(float(posicion['positionAmt']))
     pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
     st.warning(f"**POSICIÓN {side}** | Entrada: {entry:,.2f} | PNL: {pnl:,.2f} USDT")
     
-    # Cierre automático
+    # Vigilancia TP/SL
     if (side=="LONG" and (0<tp_precio<=precio_actual or 0<sl_precio>=precio_actual)) or \
        (side=="SHORT" and (0<tp_precio>=precio_actual or 0<sl_precio<=precio_actual)):
         client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
         client.registrar_trade(side, entry, precio_actual, pnl)
         st.rerun()
 else:
-    st.info("Buscando señal... (Sin operaciones abiertas)")
+    st.info("Buscando señal... (Asegúrate de que el precio no sea 0.00)")
 
 # --- BOTONES ---
 col1, col2, col3 = st.columns(3)
 if col1.button("🟢 LONG"):
     res = client.place_order("BTCUSDT", "BUY", str(cantidad))
-    if 'error' in res: st.error(res['error'])
+    if 'msg' in res: st.error(f"Error Binance: {res['msg']}")
     st.rerun()
 
 if col2.button("🔴 SHORT"):
     res = client.place_order("BTCUSDT", "SELL", str(cantidad))
-    if 'error' in res: st.error(res['error'])
+    if 'msg' in res: st.error(f"Error Binance: {res['msg']}")
     st.rerun()
 
 if col3.button("⛔ CERRAR Y REGISTRAR"):
