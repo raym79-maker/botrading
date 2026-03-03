@@ -8,18 +8,17 @@ class BinanceClient:
         self.base_url = 'https://testnet.binancefuture.com'
 
     def get_price(self, symbol="BTCUSDT"):
-        """Triple respaldo para evitar el 0.00 en Railway."""
+        """Usa una fuente de respaldo ultra-estable para evitar el 0.00."""
         urls = [
-            f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}",
-            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
-            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+            f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
+            f"https://api1.binance.com/api/v3/ticker/price?symbol={symbol}",
+            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
         ]
         for url in urls:
             try:
-                res = requests.get(url, timeout=3).json()
+                res = requests.get(url, timeout=2).json()
                 if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-                if 'bitcoin' in res: return float(res['bitcoin']['usd'])
             except: continue
         return 0.0
 
@@ -61,3 +60,4 @@ class BinanceClient:
             if not existe or os.stat(archivo).st_size == 0:
                 writer.writerow(["Fecha", "Side", "Entrada", "Salida", "PNL (USDT)"])
             writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), side, entry, exit, round(pnl, 2)])
+
