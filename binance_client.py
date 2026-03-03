@@ -19,30 +19,40 @@ class BinanceClient:
             cur = conn.cursor()
             cur.execute("CREATE TABLE IF NOT EXISTS trades (id SERIAL PRIMARY KEY, fecha TIMESTAMP, lado TEXT, entrada FLOAT, salida FLOAT, pnl FLOAT)")
             conn.commit(); cur.close(); conn.close()
-        except: pass
+        except Exception as e: print(f"Error DB: {e}")
 
     def get_indicators(self, symbol="BTCUSDT"):
-        """Descarga velas y calcula RSI y EMA para la estrategia automática."""
+        """Motor de análisis técnico: RSI y EMA."""
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
         try:
             res = requests.get(url, timeout=5).json()
             df = pd.DataFrame(res, columns=['t','o','h','l','c','v','ct','qa','n','tb','tq','i'])
             closes = df['c'].astype(float)
             ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+            # Cálculo de RSI 14
             delta = closes.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
             return round(rsi, 2), round(ema, 2), closes.iloc[-1]
         except:
-            # Respaldo de precio si fallan las velas
+            # Si fallan las velas, intentamos al menos el precio de respaldo
+            fallback_price = self.get_price(symbol)
+            return 0.0, 0.0, fallback_price
+
+    def get_price(self, symbol="BTCUSDT"):
+        """Respaldo de precio para evitar el 0.00."""
+        sources = [f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
+                   f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"]
+        for url in sources:
             try:
-                r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=2).json()
-                return 0.0, 0.0, float(r['price'])
-            except: return 0.0, 0.0, 0.0
+                res = requests.get(url, timeout=2).json()
+                if 'price' in res: return float(res['price'])
+                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
+            except: continue
+        return 0.0
 
     def set_leverage(self, symbol, leverage):
-        """Ajusta el apalancamiento en Binance Testnet."""
         return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
 
     def get_account_status(self):
@@ -56,10 +66,9 @@ class BinanceClient:
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
-        headers = {'X-MBX-APIKEY': self.api_key}
         try:
-            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
-            return requests.get(url, headers=headers, timeout=10).json()
+            if method == 'POST': return requests.post(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
+            return requests.get(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
         except: return {"error": "Error de conexión"}
 
     def place_order(self, symbol, side, quantity):
