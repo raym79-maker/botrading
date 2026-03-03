@@ -61,3 +61,12 @@ if os.path.exists("historial_trades.csv"):
 # REFRESCAR CADA 2 SEGUNDOS
 time.sleep(2)
 st.rerun()
+
+# ... (imports iniciales iguales)
+# REFRÉSCALO ASÍ AL FINAL DEL ARCHIVO:
+if precio_actual == 0:
+    st.error("Error de conexión: No se pudo obtener el precio de ninguna fuente. Revisa los logs de Railway.")
+
+time.sleep(3) # Aumentamos a 3 segundos para estabilidad en Railway
+st.rerun()
+
