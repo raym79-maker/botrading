@@ -39,7 +39,7 @@ with st.sidebar:
 # --- GRÁFICO CON EMA Y RSI VISIBLES ---
 # Nota: "MAExp" es el ID técnico para la Media Móvil Exponencial
 components.html(f"""
-<div style="height:450px;">
+<div style="height:600px;">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
   <script type="text/javascript">
   new TradingView.widget({{
@@ -62,7 +62,7 @@ components.html(f"""
   </script>
   <div id="tv_chart"></div>
 </div>
-""", height=450)
+""", height=600)
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
@@ -109,3 +109,4 @@ df = client.obtener_historial_db()
 if df is not None: st.table(df)
 
 time.sleep(2); st.rerun()
+
