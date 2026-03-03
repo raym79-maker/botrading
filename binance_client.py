@@ -8,53 +8,49 @@ class BinanceClient:
         self.base_url = 'https://testnet.binancefuture.com'
 
     def get_price(self, symbol="BTCUSDT"):
+        """Triple respaldo para evitar el 0.00 en Railway."""
         urls = [
             f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}",
-            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
+            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         ]
         for url in urls:
             try:
                 res = requests.get(url, timeout=3).json()
                 if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
+                if 'bitcoin' in res: return float(res['bitcoin']['usd'])
             except: continue
         return 0.0
 
+    def get_balance(self):
+        """Obtiene el saldo disponible en USDT de la cuenta Demo."""
+        res = self._request('GET', '/fapi/v2/balance')
+        if isinstance(res, list):
+            for item in res:
+                if item['asset'] == 'USDT': return float(item['balance'])
+        return 0.0
+
     def _request(self, method, endpoint, params={}):
-        if not self.api_key or not self.secret_key:
-            return {"error": "Credenciales no encontradas"}
-        
+        if not self.api_key or not self.secret_key: return {"error": "Faltan llaves"}
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
-        
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
         headers = {'X-MBX-APIKEY': self.api_key}
-        
         try:
-            res = requests.request(method, url, headers=headers, timeout=10).json()
-            return res
-        except Exception as e:
-            return {"error": str(e)}
-
-    def get_balance(self):
-        """Obtiene el saldo disponible en la billetera de Futuros."""
-        data = self._request('GET', '/fapi/v2/account')
-        if isinstance(data, dict) and 'totalWalletBalance' in data:
-            return float(data['totalWalletBalance'])
-        return 0.0
+            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
+            return requests.get(url, headers=headers, timeout=10).json()
+        except: return {"error": "Error de red"}
 
     def place_order(self, symbol, side, quantity):
-        return self._request('POST', '/fapi/v1/order', {
-            "symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity
-        })
+        return self._request('POST', '/fapi/v1/order', {"symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity})
 
     def get_open_positions(self, symbol="BTCUSDT"):
         data = self._request('GET', '/fapi/v2/account')
         if isinstance(data, dict) and 'positions' in data:
             for pos in data['positions']:
-                if pos.get('symbol') == symbol and float(pos.get('positionAmt', 0)) != 0:
-                    return pos
+                if pos.get('symbol') == symbol and float(pos.get('positionAmt', 0)) != 0: return pos
         return None
 
     def registrar_trade(self, side, entry, exit, pnl):
