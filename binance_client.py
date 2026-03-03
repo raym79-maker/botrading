@@ -23,47 +23,42 @@ class BinanceClient:
         except: pass
 
     def get_indicators(self, symbol="BTCUSDT"):
-        """Triple respaldo para indicadores: Binance -> Binance API1 -> Bybit."""
-        urls = [
-            f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
-            f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
-            f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=100"
-        ]
-        
-        for url in urls:
+        """Triple fuente: Kraken (más estable en nube) -> Binance -> Bybit."""
+        # 1. Intentar con KRAKEN (Muy estable para Railway)
+        try:
+            res = requests.get("https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=15", timeout=4).json()
+            data = res['result']['XXBTZUSD']
+            df = pd.DataFrame(data)
+            closes = df[4].astype(float) # Kraken: [4] es el cierre
+            return self._calculate_math(closes)
+        except:
+            # 2. Intentar con BINANCE (API alternativa)
             try:
-                res = requests.get(url, timeout=3).json()
-                # Ajustamos si los datos vienen de Bybit (formato distinto)
-                data = res['result']['list'] if 'result' in res else res
-                df = pd.DataFrame(data)
-                
-                # En Binance y Bybit v5, el cierre es la columna 4
-                # Bybit entrega de más reciente a más antiguo, invertimos si es necesario
-                closes = df[4].astype(float) if 'result' not in res else df[4].astype(float).iloc[::-1]
-                
-                # EMA 20
-                ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
-                
-                # RSI 14
-                delta = closes.diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
-                
-                return round(rsi, 2), round(ema, 2), closes.iloc[-1]
-            except: continue
-        return 0.0, 0.0, self.get_price(symbol)
+                res = requests.get(f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100", timeout=3).json()
+                df = pd.DataFrame(res)
+                closes = df[4].astype(float)
+                return self._calculate_math(closes)
+            except:
+                return 0.0, 0.0, self.get_price(symbol)
+
+    def _calculate_math(self, closes):
+        """Cálculo interno de indicadores."""
+        ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+        delta = closes.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
+        return round(rsi, 2), round(ema, 2), closes.iloc[-1]
 
     def get_price(self, symbol="BTCUSDT"):
-        urls = [f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
-                f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"]
-        for url in urls:
+        try:
+            r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=2).json()
+            return float(r['price'])
+        except:
             try:
-                res = requests.get(url, timeout=2).json()
-                if 'price' in res: return float(res['price'])
-                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-            except: continue
-        return 0.0
+                r = requests.get("https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT", timeout=2).json()
+                return float(r['result']['list'][0]['lastPrice'])
+            except: return 0.0
 
     def set_leverage(self, symbol, leverage):
         return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
