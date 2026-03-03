@@ -3,13 +3,12 @@ import time, pandas as pd, os
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-# Configuración inicial
 st.set_page_config(page_title="Terminal Trading Cloud", layout="wide")
 client = BinanceClient()
 
 st.title("📈 Terminal de Trading (Cloud)")
 
-# --- PANEL LATERAL (SIDEBAR) ---
+# --- PANEL LATERAL ---
 with st.sidebar:
     st.header("💰 Mi Cuenta")
     info = client.get_account_status()
@@ -21,11 +20,10 @@ with st.sidebar:
     st.write(f"**Saldo Billetera:** {info['wallet']:,.2f} USDT")
     
     st.divider()
-
     st.header("⚙️ Parámetros")
     cantidad = st.number_input("CANTIDAD BTC", value=0.002, format="%.3f")
-    
     precio_actual = client.get_price("BTCUSDT")
+    
     if precio_actual > 0:
         st.info(f"Valor aprox: {(cantidad * precio_actual):,.2f} USDT")
     
@@ -33,7 +31,7 @@ with st.sidebar:
     sl_precio = st.number_input("Stop Loss (USDT)", value=0.0)
     st.metric("Precio Bitcoin", f"{precio_actual:,.2f} USDT")
 
-# --- GRÁFICO TRADINGVIEW ---
+# --- GRÁFICO ---
 components.html("""
 <div style="height:400px;">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
@@ -53,21 +51,18 @@ if posicion:
     
     if precio_actual > 0:
         pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
-        # Línea con colores 🟢/🔴 dinámicos
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.2f} USDT")
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.4f} USDT")
         
-        # Vigilancia automática TP/SL
+        # Cierre automático por TP o SL
         if (side=="LONG" and (0 < tp_precio <= precio_actual or 0 < sl_precio >= precio_actual)) or \
            (side=="SHORT" and (0 < tp_precio >= precio_actual or 0 < sl_precio <= precio_actual)):
             client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
             client.registrar_trade(side, entry, precio_actual, pnl)
             st.rerun()
-    else:
-        st.info(f"**POSICIÓN ACTIVA: {side}** | Sincronizando precio real...")
 else:
     st.success("Sin operaciones abiertas.")
 
-# --- BOTONES DE ACCIÓN ---
+# --- BOTONES ---
 col1, col2, col3 = st.columns(3)
 if col1.button("🟢 ABRIR LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
 if col2.button("🔴 ABRIR SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
@@ -84,6 +79,5 @@ if os.path.exists("historial_trades.csv"):
     df = pd.read_csv("historial_trades.csv")
     st.table(df.tail(10))
 
-# Actualización automática cada 2 segundos
 time.sleep(2)
 st.rerun()
