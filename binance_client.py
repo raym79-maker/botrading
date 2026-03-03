@@ -8,39 +8,40 @@ class BinanceClient:
         self.base_url = 'https://testnet.binancefuture.com'
 
     def get_price(self, symbol="BTCUSDT"):
-        """Usa una fuente de respaldo ultra-estable para evitar el 0.00."""
-        urls = [
-            f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
-            f"https://api1.binance.com/api/v3/ticker/price?symbol={symbol}",
-            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+        """Intenta 4 fuentes distintas. Si todas fallan, devuelve 0.0."""
+        # Fuente 1: Binance Spot (a veces menos bloqueada que Futures)
+        # Fuente 2: Bybit API
+        # Fuente 3: Binance Futures Pública
+        # Fuente 4: CoinGecko (Lenta pero segura contra bloqueos de IP)
+        sources = [
+            "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+            "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT",
+            "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT",
+            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
         ]
-        for url in urls:
+        
+        for url in sources:
             try:
                 res = requests.get(url, timeout=2).json()
                 if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-            except: continue
-        return 0.0
-
-    def get_balance(self):
-        """Obtiene el saldo disponible en USDT de la cuenta Demo."""
-        res = self._request('GET', '/fapi/v2/balance')
-        if isinstance(res, list):
-            for item in res:
-                if item['asset'] == 'USDT': return float(item['balance'])
+                if 'bitcoin' in res: return float(res['bitcoin']['usd'])
+            except:
+                continue
         return 0.0
 
     def _request(self, method, endpoint, params={}):
-        if not self.api_key or not self.secret_key: return {"error": "Faltan llaves"}
+        if not self.api_key or not self.secret_key:
+            return {"error": "Llaves no encontradas"}
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
-        url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
         headers = {'X-MBX-APIKEY': self.api_key}
+        url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
         try:
             if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
             return requests.get(url, headers=headers, timeout=10).json()
-        except: return {"error": "Error de red"}
+        except: return {"error": "Fallo de conexión"}
 
     def place_order(self, symbol, side, quantity):
         return self._request('POST', '/fapi/v1/order', {"symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity})
@@ -60,4 +61,3 @@ class BinanceClient:
             if not existe or os.stat(archivo).st_size == 0:
                 writer.writerow(["Fecha", "Side", "Entrada", "Salida", "PNL (USDT)"])
             writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), side, entry, exit, round(pnl, 2)])
-
