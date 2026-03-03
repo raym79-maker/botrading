@@ -18,8 +18,8 @@ with st.sidebar:
     st.header("⚖️ Control de Riesgo")
     lev = st.slider("Apalancamiento (x)", 1, 125, 20)
     if st.button("Aplicar Apalancamiento"):
-        res = client.set_leverage("BTCUSDT", lev)
-        st.toast(f"Apalancamiento a {lev}x", icon="🚀")
+        client.set_leverage("BTCUSDT", lev)
+        st.success(f"Ajustado a {lev}x")
 
     st.divider()
     auto_mode = st.toggle("🤖 ACTIVAR ESTRATEGIA AUTO")
@@ -41,15 +41,16 @@ if posicion:
     entry = float(posicion['entryPrice'])
     tamano = abs(float(posicion['positionAmt']))
     
-    # PROTECCIÓN: Solo calcular PNL si el precio es real
+    # SOLO calculamos PNL si el precio NO es cero para evitar errores locos
     if precio_actual > 0:
         pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
         st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.4f} USDT")
     else:
-        st.info(f"**POSICIÓN ACTIVA: {side}** | Esperando actualización de precio...")
+        st.error("⚠️ Error de conexión: Precio en 0.00. Cálculos pausados.")
 
 elif auto_mode and precio_actual > 0 and rsi > 0:
     st.info("🤖 Bot analizando mercado...")
+    # Lógica de entrada automática
     if rsi < 35 and precio_actual > ema:
         client.place_order("BTCUSDT", "BUY", str(cantidad))
         st.rerun()
@@ -70,7 +71,7 @@ if c3.button("⛔ CERRAR Y REGISTRAR"):
         st.rerun()
 
 # --- HISTORIAL ---
-st.subheader("📋 Historial (DB)")
+st.subheader("📋 Historial (PostgreSQL)")
 df = client.obtener_historial_db()
 if df is not None: st.table(df)
 
