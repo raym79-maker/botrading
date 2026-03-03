@@ -2,6 +2,16 @@ import requests, time, hmac, hashlib, csv, os
 from datetime import datetime
 
 class BinanceClient:
+    def get_balance(self):
+        """Obtiene el saldo disponible en USDT de la cuenta Demo."""
+        res = self._request('GET', '/fapi/v2/balance')
+        # La respuesta es una lista, buscamos el activo 'USDT'
+        if isinstance(res, list):
+            for item in res:
+                if item.get('asset') == 'USDT':
+                    return float(item.get('balance', 0))
+        return 0.0
+        
     def __init__(self):
         self.api_key = os.getenv("API_KEY")
         self.secret_key = os.getenv("SECRET_KEY")
@@ -60,3 +70,4 @@ class BinanceClient:
             if not existe or os.stat(archivo).st_size == 0:
                 writer.writerow(["Fecha", "Side", "Entrada", "Salida", "PNL (USDT)"])
             writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), side, entry, exit, round(pnl, 2)])
+
