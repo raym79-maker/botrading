@@ -10,18 +10,21 @@ st.title("📈 Terminal de Trading (Cloud)")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
+    # NUEVA SECCIÓN: SALDO TOTAL
+    st.header("Mi Cuenta")
+    saldo_actual = client.get_balance()
+    st.metric("Saldo Disponible", f"{saldo_actual:,.2f} USDT")
+    
+    st.divider() # Línea divisora estética
+
     st.header("Control de Riesgo")
     cantidad = st.number_input("CANTIDAD BTC", value=0.002, format="%.3f")
     
-    # Obtener precio primero
     precio_actual = client.get_price("BTCUSDT")
     
-    # Cálculo seguro del valor aproximado
     if precio_actual > 0:
         valor_op = cantidad * precio_actual
         st.info(f"Valor aproximado: {valor_op:,.2f} USDT")
-    else:
-        st.error("Error: Sin conexión a precio")
     
     tp_precio = st.number_input("Take Profit (USDT)", value=0.0)
     sl_precio = st.number_input("Stop Loss (USDT)", value=0.0)
@@ -37,19 +40,18 @@ if posicion:
     entry = float(posicion['entryPrice'])
     tamano = abs(float(posicion['positionAmt']))
     
-    # Solo mostramos el PNL si tenemos precio real
     if precio_actual > 0:
         pnl = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
         st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: {entry:,.2f} | PNL: {'🟢' if pnl >= 0 else '🔴'} {pnl:,.2f} USDT")
         
-        # Vigilancia automática
+        # Vigilancia automática TP/SL
         if (side=="LONG" and (0 < tp_precio <= precio_actual or 0 < sl_precio >= precio_actual)) or \
            (side=="SHORT" and (0 < tp_precio >= precio_actual or 0 < sl_precio <= precio_actual)):
             client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
             client.registrar_trade(side, entry, precio_actual, pnl)
             st.rerun()
     else:
-        st.info(f"**POSICIÓN ACTIVA: {side}** | Esperando actualización de precio real...")
+        st.info(f"**POSICIÓN ACTIVA: {side}** | Esperando actualización de precio...")
 else:
     st.success("Sin operaciones abiertas.")
 
