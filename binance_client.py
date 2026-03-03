@@ -3,31 +3,26 @@ from datetime import datetime
 
 class BinanceClient:
     def __init__(self):
-        # Railway lee esto desde la pestaña 'Variables'
         self.api_key = os.getenv("API_KEY")
         self.secret_key = os.getenv("SECRET_KEY")
-        # URL Oficial de Binance Futures TESTNET
         self.base_url = 'https://testnet.binancefuture.com'
 
     def get_price(self, symbol="BTCUSDT"):
-        """Triple respaldo: Binance Real -> Bybit -> Binance Testnet."""
         urls = [
             f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}",
-            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
-            f"{self.base_url}/fapi/v1/ticker/price?symbol={symbol}"
+            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
         ]
         for url in urls:
             try:
                 res = requests.get(url, timeout=3).json()
                 if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-            except:
-                continue
+            except: continue
         return 0.0
 
     def _request(self, method, endpoint, params={}):
         if not self.api_key or not self.secret_key:
-            return {"error": "Credenciales no encontradas en Railway."}
+            return {"error": "Credenciales no encontradas"}
         
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
@@ -37,11 +32,17 @@ class BinanceClient:
         headers = {'X-MBX-APIKEY': self.api_key}
         
         try:
-            if method == 'POST':
-                return requests.post(url, headers=headers, timeout=10).json()
-            return requests.get(url, headers=headers, timeout=10).json()
+            res = requests.request(method, url, headers=headers, timeout=10).json()
+            return res
         except Exception as e:
             return {"error": str(e)}
+
+    def get_balance(self):
+        """Obtiene el saldo disponible en la billetera de Futuros."""
+        data = self._request('GET', '/fapi/v2/account')
+        if isinstance(data, dict) and 'totalWalletBalance' in data:
+            return float(data['totalWalletBalance'])
+        return 0.0
 
     def place_order(self, symbol, side, quantity):
         return self._request('POST', '/fapi/v1/order', {
