@@ -3,35 +3,47 @@ from datetime import datetime
 
 class BinanceClient:
     def __init__(self):
+        # Variables de Railway
         self.api_key = os.getenv("API_KEY")
         self.secret_key = os.getenv("SECRET_KEY")
         self.db_url = os.getenv("DATABASE_URL")
         self.base_url = 'https://testnet.binancefuture.com'
-        self._init_db()
+        
+        # Conexión Segura a la DB
+        if self.db_url:
+            # Corregimos el protocolo si es necesario
+            if self.db_url.startswith("postgres://"):
+                self.db_url = self.db_url.replace("postgres://", "postgresql://", 1)
+            self._init_db()
 
     def _init_db(self):
-        """Crea la tabla de trades en PostgreSQL si no existe."""
-        conn = psycopg2.connect(self.db_url)
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS trades (
-                id SERIAL PRIMARY KEY,
-                fecha TIMESTAMP,
-                lado TEXT,
-                entrada FLOAT,
-                salida FLOAT,
-                pnl FLOAT
-            )
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
+        """Crea la tabla permanente de trades."""
+        try:
+            conn = psycopg2.connect(self.db_url)
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id SERIAL PRIMARY KEY,
+                    fecha TIMESTAMP,
+                    lado TEXT,
+                    entrada FLOAT,
+                    salida FLOAT,
+                    pnl FLOAT
+                )
+            """)
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"Error inicializando DB: {e}")
 
     def get_price(self, symbol="BTCUSDT"):
+        """Estrategia de 4 fuentes para evitar el 0.00 en Railway."""
         sources = [
             f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
             f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
-            f"https://api.coinbase.com/v2/prices/BTC-USD/spot"
+            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+            f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
         ]
         for url in sources:
             try:
@@ -43,6 +55,7 @@ class BinanceClient:
         return 0.0
 
     def get_account_status(self):
+        """Resumen de cuenta: Billetera, PNL Flotante y Patrimonio (Equity)."""
         res = self._request('GET', '/fapi/v2/account')
         if isinstance(res, dict) and 'totalWalletBalance' in res:
             return {
@@ -53,14 +66,15 @@ class BinanceClient:
         return {"wallet": 0.0, "unrealized_pnl": 0.0, "equity": 0.0}
 
     def _request(self, method, endpoint, params={}):
+        if not self.api_key: return {"error": "Sin llaves"}
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
         headers = {'X-MBX-APIKEY': self.api_key}
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
         try:
-            if method == 'POST': return requests.post(url, headers=headers, timeout=5).json()
-            return requests.get(url, headers=headers, timeout=5).json()
+            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
+            return requests.get(url, headers=headers, timeout=10).json()
         except: return {"error": "Error de conexión"}
 
     def place_order(self, symbol, side, quantity):
@@ -74,21 +88,28 @@ class BinanceClient:
         return None
 
     def registrar_trade(self, side, entry, exit, pnl):
-        """Guarda el trade de forma permanente en PostgreSQL."""
-        conn = psycopg2.connect(self.db_url)
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO trades (fecha, lado, entrada, salida, pnl) VALUES (%s, %s, %s, %s, %s)",
-            (datetime.now(), side, entry, exit, round(pnl, 4))
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
+        """Inserta el trade en PostgreSQL."""
+        if not self.db_url: return
+        try:
+            conn = psycopg2.connect(self.db_url)
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO trades (fecha, lado, entrada, salida, pnl) VALUES (%s, %s, %s, %s, %s)",
+                (datetime.now(), side, entry, exit, round(pnl, 4))
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"Error al registrar: {e}")
 
     def obtener_historial_db(self):
-        """Recupera los últimos 10 trades de la base de datos."""
-        conn = psycopg2.connect(self.db_url)
+        """Lee los últimos 10 trades de la base de datos."""
+        if not self.db_url: return None
         import pandas as pd
-        df = pd.read_sql("SELECT fecha, lado, entrada, salida, pnl FROM trades ORDER BY id DESC LIMIT 10", conn)
-        conn.close()
-        return df
+        try:
+            conn = psycopg2.connect(self.db_url)
+            df = pd.read_sql("SELECT fecha, lado, entrada, salida, pnl FROM trades ORDER BY fecha DESC LIMIT 10", conn)
+            conn.close()
+            return df
+        except: return None
