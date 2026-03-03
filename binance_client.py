@@ -15,7 +15,6 @@ class BinanceClient:
             self._init_db()
 
     def _init_db(self):
-        """Crea la tabla permanente de trades en la DB de Railway."""
         try:
             conn = psycopg2.connect(self.db_url)
             cur = conn.cursor()
@@ -24,7 +23,7 @@ class BinanceClient:
         except: pass
 
     def get_indicators(self, symbol="BTCUSDT"):
-        """Intenta obtener RSI/EMA de Binance; si falla, usa Bybit como respaldo."""
+        """Intenta obtener RSI/EMA de Binance; si falla, usa Bybit."""
         urls = [
             f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
             f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=100"
@@ -32,13 +31,14 @@ class BinanceClient:
         for url in urls:
             try:
                 res = requests.get(url, timeout=3).json()
-                # Ajustar formato si es Bybit
                 data = res['result']['list'] if 'result' in res else res
                 df = pd.DataFrame(data)
-                # Bybit v5 entrega datos de nuevo a viejo, Binance de viejo a nuevo
                 closes = df[4].astype(float) if 'result' not in res else df[4].astype(float).iloc[::-1]
                 
+                # EMA 20: $EMA_{t} = (Price_{t} \times K) + (EMA_{y} \times (1 - K))$
                 ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+                
+                # RSI 14: $RSI = 100 - \frac{100}{1 + RS}$
                 delta = closes.diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -48,11 +48,12 @@ class BinanceClient:
         return 0.0, 0.0, self.get_price(symbol)
 
     def get_price(self, symbol="BTCUSDT"):
-        """Triple respaldo: Binance -> Bybit -> Coinbase."""
+        """Cuádruple respaldo: Binance -> Bybit -> Coinbase -> CryptoCompare."""
         urls = [
             f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
             f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
-            "https://api.coinbase.com/v2/prices/BTC-USD/spot"
+            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+            "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USDT"
         ]
         for url in urls:
             try:
@@ -60,8 +61,12 @@ class BinanceClient:
                 if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
                 if 'data' in res: return float(res['data']['amount'])
+                if 'USDT' in res: return float(res['USDT'])
             except: continue
         return 0.0
+
+    def set_leverage(self, symbol, leverage):
+        return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
 
     def get_account_status(self):
         res = self._request('GET', '/fapi/v2/account')
