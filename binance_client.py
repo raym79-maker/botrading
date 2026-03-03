@@ -27,7 +27,8 @@ class BinanceClient:
         except Exception as e: print(f"Error DB: {e}")
 
     def get_indicators(self, symbol="BTCUSDT", interval="15m"):
-        """Obtiene RSI y EMA con sistema de reintento para evitar el 0.00."""
+        """Intenta obtener indicadores de Binance; si falla, usa Coinbase para el precio."""
+        # Intentamos obtener velas de Binance (necesario para RSI/EMA)
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=100"
         try:
             res = requests.get(url, timeout=5).json()
@@ -40,23 +41,27 @@ class BinanceClient:
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
             return round(rsi, 2), round(ema, 2), closes.iloc[-1]
         except:
-            # Si falla la API de velas, intentamos al menos el precio spot
-            price = self.get_price(symbol)
-            return 0.0, 0.0, price
+            # SI BINANCE BLOQUEA: Obtenemos el precio de Coinbase para que la UI no marque 0.00
+            fallback_price = self.get_price(symbol)
+            return 0.0, 0.0, fallback_price
 
     def get_price(self, symbol="BTCUSDT"):
-        sources = [f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
-                   f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"]
+        """Respaldo masivo: Bybit -> Coinbase -> Kraken."""
+        sources = [
+            "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT",
+            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+            "https://api.kraken.com/0/public/Ticker?pair=XBTUSD"
+        ]
         for url in sources:
             try:
                 res = requests.get(url, timeout=2).json()
-                if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
+                if 'data' in res: return float(res['data']['amount'])
+                if 'result' in res and 'XXBTZUSD' in res['result']: return float(res['result']['XXBTZUSD']['c'][0])
             except: continue
         return 0.0
 
     def set_leverage(self, symbol, leverage):
-        """Ajusta el apalancamiento en la cuenta de Binance."""
         return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
 
     def get_account_status(self):
