@@ -22,22 +22,36 @@ class BinanceClient:
             conn.commit(); cur.close(); conn.close()
         except Exception as e: print(f"Error DB: {e}")
 
+    def get_price(self, symbol="BTCUSDT"):
+        """Triple salto: Binance -> Bybit -> CryptoCompare (Infalible)."""
+        urls = [
+            f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
+            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
+            "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USDT"
+        ]
+        for url in urls:
+            try:
+                res = requests.get(url, timeout=2).json()
+                if 'price' in res: return float(res['price'])
+                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
+                if 'USDT' in res: return float(res['USDT'])
+            except: continue
+        return 0.0
+
     def get_indicators(self, symbol="BTCUSDT"):
-        """Intenta obtener velas de Binance; si falla, las pide a Bybit para el RSI."""
+        """Obtiene velas para RSI/EMA. Si Binance bloquea, Bybit es el respaldo."""
         sources = [
             f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
-            f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
             f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=100"
         ]
-        
         for url in sources:
             try:
-                res = requests.get(url, timeout=5).json()
-                # Ajuste de formato si los datos vienen de Bybit
+                res = requests.get(url, timeout=3).json()
                 data = res['result']['list'] if 'result' in res else res
                 df = pd.DataFrame(data)
-                # Binance usa columna 4 para cierre, Bybit usa columna 4 también en v5
-                closes = df[4].astype(float) if 'result' not in res else df[4].astype(float).iloc[::-1]
+                # Extraemos cierres (columna 4 en ambos)
+                closes = df[4].astype(float)
+                if 'result' in res: closes = closes.iloc[::-1] # Bybit viene invertido
                 
                 ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
                 delta = closes.diff()
@@ -47,17 +61,6 @@ class BinanceClient:
                 return round(rsi, 2), round(ema, 2), closes.iloc[-1]
             except: continue
         return 0.0, 0.0, self.get_price(symbol)
-
-    def get_price(self, symbol="BTCUSDT"):
-        sources = [f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
-                   f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"]
-        for url in sources:
-            try:
-                res = requests.get(url, timeout=2).json()
-                if 'price' in res: return float(res['price'])
-                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-            except: continue
-        return 0.0
 
     def set_leverage(self, symbol, leverage):
         return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
@@ -74,8 +77,7 @@ class BinanceClient:
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
         try:
-            if method == 'POST': return requests.post(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
-            return requests.get(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
+            return requests.request(method, url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
         except: return {"error": "Error de conexión"}
 
     def place_order(self, symbol, side, quantity):
