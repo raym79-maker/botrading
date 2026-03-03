@@ -17,68 +17,38 @@ class BinanceClient:
         try:
             conn = psycopg2.connect(self.db_url)
             cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS trades (
-                    id SERIAL PRIMARY KEY, fecha TIMESTAMP, lado TEXT, 
-                    entrada FLOAT, salida FLOAT, pnl FLOAT
-                )
-            """)
-            conn.commit() ; cur.close() ; conn.close()
-        except Exception as e: print(f"Error DB: {e}")
+            cur.execute("CREATE TABLE IF NOT EXISTS trades (id SERIAL PRIMARY KEY, fecha TIMESTAMP, lado TEXT, entrada FLOAT, salida FLOAT, pnl FLOAT)")
+            conn.commit(); cur.close(); conn.close()
+        except: pass
 
-    def get_indicators(self, symbol="BTCUSDT", interval="15m"):
-        """Intenta obtener indicadores de Binance; si falla, usa Coinbase para el precio."""
-        # Intentamos obtener velas de Binance (necesario para RSI/EMA)
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=100"
+    def get_indicators(self, symbol="BTCUSDT"):
+        """Calcula RSI y EMA descargando las últimas velas de Binance."""
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
         try:
             res = requests.get(url, timeout=5).json()
             df = pd.DataFrame(res, columns=['t','o','h','l','c','v','ct','qa','n','tb','tq','i'])
             closes = df['c'].astype(float)
+            # EMA 20
             ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+            # RSI 14
             delta = closes.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
             return round(rsi, 2), round(ema, 2), closes.iloc[-1]
         except:
-            # SI BINANCE BLOQUEA: Obtenemos el precio de Coinbase para que la UI no marque 0.00
-            fallback_price = self.get_price(symbol)
-            return 0.0, 0.0, fallback_price
-
-    def get_price(self, symbol="BTCUSDT"):
-        """Respaldo masivo: Bybit -> Coinbase -> Kraken."""
-        sources = [
-            "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT",
-            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
-            "https://api.kraken.com/0/public/Ticker?pair=XBTUSD"
-        ]
-        for url in sources:
-            try:
-                res = requests.get(url, timeout=2).json()
-                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-                if 'data' in res: return float(res['data']['amount'])
-                if 'result' in res and 'XXBTZUSD' in res['result']: return float(res['result']['XXBTZUSD']['c'][0])
-            except: continue
-        return 0.0
-
-    def set_leverage(self, symbol, leverage):
-        return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
-
-    def get_account_status(self):
-        res = self._request('GET', '/fapi/v2/account')
-        if isinstance(res, dict) and 'totalWalletBalance' in res:
-            return {"wallet": float(res['totalWalletBalance']), "unrealized_pnl": float(res['totalUnrealizedProfit']), "equity": float(res['totalMarginBalance'])}
-        return {"wallet": 0.0, "unrealized_pnl": 0.0, "equity": 0.0}
+            return 0.0, 0.0, 0.0
 
     def _request(self, method, endpoint, params={}):
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
+        headers = {'X-MBX-APIKEY': self.api_key}
         try:
-            if method == 'POST': return requests.post(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
-            return requests.get(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
-        except: return {"error": "Error de conexión"}
+            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
+            return requests.get(url, headers=headers, timeout=10).json()
+        except: return {"error": "Conexión fallida"}
 
     def place_order(self, symbol, side, quantity):
         return self._request('POST', '/fapi/v1/order', {"symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity})
@@ -96,7 +66,7 @@ class BinanceClient:
             conn = psycopg2.connect(self.db_url)
             cur = conn.cursor()
             cur.execute("INSERT INTO trades (fecha, lado, entrada, salida, pnl) VALUES (%s, %s, %s, %s, %s)", (datetime.now(), side, entry, exit, round(pnl, 4)))
-            conn.commit() ; cur.close() ; conn.close()
+            conn.commit(); cur.close(); conn.close()
         except: pass
 
     def obtener_historial_db(self):
