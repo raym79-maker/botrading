@@ -23,45 +23,45 @@ class BinanceClient:
         except: pass
 
     def get_indicators(self, symbol="BTCUSDT"):
-        """Intenta obtener RSI/EMA de Binance; si falla, usa Bybit."""
+        """Triple respaldo para indicadores: Binance -> Binance API1 -> Bybit."""
         urls = [
             f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
+            f"https://api1.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100",
             f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=100"
         ]
+        
         for url in urls:
             try:
                 res = requests.get(url, timeout=3).json()
+                # Ajustamos si los datos vienen de Bybit (formato distinto)
                 data = res['result']['list'] if 'result' in res else res
                 df = pd.DataFrame(data)
+                
+                # En Binance y Bybit v5, el cierre es la columna 4
+                # Bybit entrega de más reciente a más antiguo, invertimos si es necesario
                 closes = df[4].astype(float) if 'result' not in res else df[4].astype(float).iloc[::-1]
                 
-                # EMA 20: $EMA_{t} = (Price_{t} \times K) + (EMA_{y} \times (1 - K))$
+                # EMA 20
                 ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
                 
-                # RSI 14: $RSI = 100 - \frac{100}{1 + RS}$
+                # RSI 14
                 delta = closes.diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                 rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
+                
                 return round(rsi, 2), round(ema, 2), closes.iloc[-1]
             except: continue
         return 0.0, 0.0, self.get_price(symbol)
 
     def get_price(self, symbol="BTCUSDT"):
-        """Cuádruple respaldo: Binance -> Bybit -> Coinbase -> CryptoCompare."""
-        urls = [
-            f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
-            f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
-            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
-            "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USDT"
-        ]
+        urls = [f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
+                f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"]
         for url in urls:
             try:
                 res = requests.get(url, timeout=2).json()
                 if 'price' in res: return float(res['price'])
                 if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-                if 'data' in res: return float(res['data']['amount'])
-                if 'USDT' in res: return float(res['USDT'])
             except: continue
         return 0.0
 
