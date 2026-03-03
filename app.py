@@ -6,13 +6,13 @@ from binance_client import BinanceClient
 st.set_page_config(page_title="Terminal Trading Cloud 2026", layout="wide")
 client = BinanceClient()
 
-st.title("📈 Terminal de Trading (Pro RSI+EMA)")
+st.title("🤖 Terminal Trading (Auto RSI+EMA)")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
-    st.header("💰 Estado de Cuenta")
+    st.header("💰 Cuenta")
     info = client.get_account_status()
-    st.metric("Equity (Total)", f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} PNL")
+    st.metric("Equity", f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} PNL")
     
     st.divider()
     st.header("⚖️ Riesgo")
@@ -28,7 +28,7 @@ with st.sidebar:
     sl_input = st.number_input("Stop Loss (Precio)", value=0.0)
     
     st.divider()
-    auto_mode = st.toggle("🤖 ACTIVAR MODO AUTO")
+    auto_mode = st.toggle("🚀 ACTIVAR MODO AUTO")
     
     rsi, ema, precio_actual = client.get_indicators()
     c1, c2 = st.columns(2)
@@ -36,14 +36,28 @@ with st.sidebar:
     c2.metric("EMA (20)", f"{ema if ema > 0 else 'Cargando...'}")
     st.metric("BTC Precio Actual", f"{precio_actual:,.2f} USDT")
 
-# --- GRÁFICO ---
+# --- GRÁFICO CON EMA Y RSI VISIBLES ---
+# Nota: "MAExp" es el ID técnico para la Media Móvil Exponencial
 components.html(f"""
 <div style="height:450px;">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
   <script type="text/javascript">
   new TradingView.widget({{
-    "autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart",
-    "studies": ["RSI@tv-basicstudies", "Moving Average Exponential@tv-basicstudies"]
+    "autosize": true,
+    "symbol": "BINANCE:BTCUSDT",
+    "interval": "15",
+    "theme": "dark",
+    "style": "1",
+    "locale": "es",
+    "toolbar_bg": "#f1f3f6",
+    "enable_publishing": false,
+    "hide_top_toolbar": false,
+    "save_image": false,
+    "container_id": "tv_chart",
+    "studies": [
+      "RSI@tv-basicstudies",
+      "MAExp@tv-basicstudies"
+    ]
   }});
   </script>
   <div id="tv_chart"></div>
@@ -52,7 +66,7 @@ components.html(f"""
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
-pnl_actual = 0.0
+pnl_valor = 0.0
 
 if posicion:
     side = "LONG" if float(posicion['positionAmt']) > 0 else "SHORT"
@@ -60,17 +74,15 @@ if posicion:
     tamano = abs(float(posicion['positionAmt']))
     
     if precio_actual > 0:
-        pnl_actual = (precio_actual - entry_p) * tamano if side == "LONG" else (entry_p - precio_actual) * tamano
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {'🟢' if pnl_actual >= 0 else '🔴'} {pnl_actual:,.4f} USDT")
+        pnl_valor = (precio_actual - entry_p) * tamano if side == "LONG" else (entry_p - precio_actual) * tamano
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {'🟢' if pnl_valor >= 0 else '🔴'} {pnl_valor:,.4f} USDT")
         
         # Cierre automático por TP/SL
         if (side == "LONG" and ((tp_input > 0 and precio_actual >= tp_input) or (sl_input > 0 and precio_actual <= sl_input))) or \
            (side == "SHORT" and ((tp_input > 0 and precio_actual <= tp_input) or (sl_input > 0 and precio_actual >= sl_input))):
             client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
-            client.registrar_trade(side, entry_p, precio_actual, pnl_actual)
+            client.registrar_trade(side, entry_p, precio_actual, pnl_valor)
             st.rerun()
-    else:
-        st.info("Sincronizando precio...")
 
 elif auto_mode and precio_actual > 0 and rsi > 0:
     st.info("🤖 Bot analizando mercado...")
@@ -81,13 +93,14 @@ elif auto_mode and precio_actual > 0 and rsi > 0:
 
 # --- BOTONES ---
 st.divider()
-col1, col2, col3 = st.columns(3)
-if col1.button("🟢 ABRIR LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
-if col2.button("🔴 ABRIR SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
-if col3.button("⛔ CERRAR Y REGISTRAR"):
+c1, c2, c3 = st.columns(3)
+if c1.button("🟢 ABRIR LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
+if c2.button("🔴 ABRIR SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
+if c3.button("⛔ CERRAR Y REGISTRAR"):
     if posicion:
+        p_final = pnl_valor if precio_actual > 0 else 0.0
         client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
-        client.registrar_trade(side, entry_p, precio_actual, pnl_actual)
+        client.registrar_trade(side, entry_p, precio_actual, p_final)
         st.rerun()
 
 # --- HISTORIAL ---
