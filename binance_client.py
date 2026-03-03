@@ -22,32 +22,46 @@ class BinanceClient:
         except: pass
 
     def get_indicators(self, symbol="BTCUSDT"):
-        """Calcula RSI y EMA descargando las últimas velas de Binance."""
+        """Intenta obtener RSI/EMA de Binance; si falla, usa fuentes de respaldo para el precio."""
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
         try:
-            res = requests.get(url, timeout=5).json()
+            res = requests.get(url, timeout=3).json()
             df = pd.DataFrame(res, columns=['t','o','h','l','c','v','ct','qa','n','tb','tq','i'])
             closes = df['c'].astype(float)
-            # EMA 20
             ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
-            # RSI 14
             delta = closes.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
             return round(rsi, 2), round(ema, 2), closes.iloc[-1]
         except:
+            # RESPALDO: Si Binance falla, consultamos Bybit o Coinbase para no tener 0.00
+            fallback_sources = [
+                f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
+                f"https://api.coinbase.com/v2/prices/BTC-USD/spot"
+            ]
+            for f_url in fallback_sources:
+                try:
+                    r = requests.get(f_url, timeout=2).json()
+                    if 'result' in r: return 0.0, 0.0, float(r['result']['list'][0]['lastPrice'])
+                    if 'data' in r: return 0.0, 0.0, float(r['data']['amount'])
+                except: continue
             return 0.0, 0.0, 0.0
+
+    def get_account_status(self):
+        res = self._request('GET', '/fapi/v2/account')
+        if isinstance(res, dict) and 'totalWalletBalance' in res:
+            return {"wallet": float(res['totalWalletBalance']), "unrealized_pnl": float(res['totalUnrealizedProfit']), "equity": float(res['totalMarginBalance'])}
+        return {"wallet": 0.0, "unrealized_pnl": 0.0, "equity": 0.0}
 
     def _request(self, method, endpoint, params={}):
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
-        headers = {'X-MBX-APIKEY': self.api_key}
         try:
-            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
-            return requests.get(url, headers=headers, timeout=10).json()
+            if method == 'POST': return requests.post(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=5).json()
+            return requests.get(url, headers={'X-MBX-APIKEY': self.api_key}, timeout=5).json()
         except: return {"error": "Conexión fallida"}
 
     def place_order(self, symbol, side, quantity):
