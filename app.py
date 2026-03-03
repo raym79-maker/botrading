@@ -3,33 +3,34 @@ import time, os
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-st.set_page_config(page_title="Terminal Trading Auto", layout="wide")
+st.set_page_config(page_title="Terminal Trading Cloud 2026", layout="wide")
 client = BinanceClient()
 
-st.title("🤖 Terminal Trading (Auto RSI+EMA)")
+st.title("📈 Terminal de Trading (Pro RSI+EMA)")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
-    st.header("💰 Cuenta")
+    st.header("💰 Estado de Cuenta")
     info = client.get_account_status()
-    st.metric("Equity", f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} PNL")
+    st.metric("Equity (Total)", f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} PNL")
     
     st.divider()
-    st.header("⚖️ Control de Riesgo")
-    lev = st.slider("Apalancamiento (x)", 1, 125, 20)
-    if st.button("Aplicar Apalancamiento"):
-        client.set_leverage("BTCUSDT", lev)
-        st.success(f"Ajustado a {lev}x")
-
-    st.divider()
-    auto_mode = st.toggle("🚀 ACTIVAR ESTRATEGIA AUTO")
-    st.header("⚙️ Configuración")
+    st.header("⚙️ Configuración de Orden")
     cantidad = st.number_input("CANTIDAD BTC", value=0.002, format="%.3f")
     
+    # RESTAURADOS: Take Profit y Stop Loss
+    tp_input = st.number_input("Take Profit (Precio)", value=0.0, help="Precio al que quieres vender con ganancias")
+    sl_input = st.number_input("Stop Loss (Precio)", value=0.0, help="Precio al que quieres vender para limitar pérdidas")
+    
+    st.divider()
+    auto_mode = st.toggle("🤖 MODO AUTOMÁTICO (RSI+EMA)")
+    
+    # Indicadores en tiempo real
     rsi, ema, precio_actual = client.get_indicators()
-    st.metric("RSI (14)", f"{rsi if rsi > 0 else 'Buscando alternativa...'}")
-    st.metric("EMA (20)", f"{ema if ema > 0 else 'Calculando...'}")
-    st.metric("BTC Precio", f"{precio_actual:,.2f} USDT")
+    c1, c2 = st.columns(2)
+    c1.metric("RSI (14)", f"{rsi if rsi > 0 else 'Cargando'}")
+    c2.metric("EMA (20)", f"{ema if ema > 0 else 'Cargando'}")
+    st.metric("BTC Precio Actual", f"{precio_actual:,.2f} USDT")
 
 # --- GRÁFICO ---
 components.html(f"""
@@ -47,21 +48,28 @@ components.html(f"""
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
-pnl_valor = 0.0 # FIX: Definimos PNL aquí para que siempre exista
+pnl_actual = 0.0
 
 if posicion:
     side = "LONG" if float(posicion['positionAmt']) > 0 else "SHORT"
-    entry = float(posicion['entryPrice'])
+    entry_price = float(posicion['entryPrice'])
     tamano = abs(float(posicion['positionAmt']))
     
     if precio_actual > 0:
-        pnl_valor = (precio_actual - entry) * tamano if side == "LONG" else (entry - precio_actual) * tamano
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {'🟢' if pnl_valor >= 0 else '🔴'} {pnl_valor:,.4f} USDT")
-    else:
-        st.error("⚠️ Precio actual no disponible. PNL pausado.")
+        pnl_actual = (precio_actual - entry_price) * tamano if side == "LONG" else (entry_price - precio_actual) * tamano
+        # MENSAJE ACTUALIZADO: Incluye el Precio de Entrada
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_price:,.2f}** | PNL: {'🟢' if pnl_actual >= 0 else '🔴'} {pnl_actual:,.4f} USDT")
+        
+        # Cierre automático por TP/SL si están configurados
+        if (side == "LONG" and ((tp_input > 0 and precio_actual >= tp_input) or (sl_input > 0 and precio_actual <= sl_input))) or \
+           (side == "SHORT" and ((tp_input > 0 and precio_actual <= tp_input) or (sl_input > 0 and precio_actual >= sl_input))):
+            client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
+            client.registrar_trade(side, entry_price, precio_actual, pnl_actual)
+            st.success(f"🎯 Orden cerrada por TP/SL en {precio_actual:,.2f}")
+            st.rerun()
 
 elif auto_mode and precio_actual > 0 and rsi > 0:
-    st.info("🤖 Bot analizando mercado...")
+    st.info("🤖 Bot analizando condiciones de entrada...")
     if rsi < 35 and precio_actual > ema:
         client.place_order("BTCUSDT", "BUY", str(cantidad))
         st.rerun()
@@ -69,20 +77,21 @@ elif auto_mode and precio_actual > 0 and rsi > 0:
         client.place_order("BTCUSDT", "SELL", str(cantidad))
         st.rerun()
 
-# --- BOTONES ---
+# --- BOTONES DE ACCIÓN ---
 st.divider()
-c1, c2, c3 = st.columns(3)
-if c1.button("🟢 MANUAL LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
-if c2.button("🔴 MANUAL SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
-if c3.button("⛔ CERRAR Y REGISTRAR"):
+col1, col2, col3 = st.columns(3)
+if col1.button("🟢 ABRIR LONG"): client.place_order("BTCUSDT", "BUY", str(cantidad)); st.rerun()
+if col2.button("🔴 ABRIR SHORT"): client.place_order("BTCUSDT", "SELL", str(cantidad)); st.rerun()
+if col3.button("⛔ CERRAR Y REGISTRAR"):
     if posicion:
-        client.place_order("BTCUSDT", "SELL" if side=="LONG" else "BUY", str(tamano))
-        client.registrar_trade(side, entry, precio_actual, pnl_valor)
+        client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
+        client.registrar_trade(side, entry_price, precio_actual, pnl_actual)
         st.rerun()
 
 # --- HISTORIAL ---
-st.subheader("📋 Historial Permanente (DB)")
+st.subheader("📋 Historial de Operaciones (PostgreSQL)")
 df = client.obtener_historial_db()
-if df is not None: st.table(df)
+if df is not None and not df.empty:
+    st.table(df)
 
 time.sleep(2); st.rerun()
