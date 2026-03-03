@@ -8,40 +8,39 @@ class BinanceClient:
         self.base_url = 'https://testnet.binancefuture.com'
 
     def get_price(self, symbol="BTCUSDT"):
-        """Intenta 4 fuentes distintas. Si todas fallan, devuelve 0.0."""
-        # Fuente 1: Binance Spot (a veces menos bloqueada que Futures)
-        # Fuente 2: Bybit API
-        # Fuente 3: Binance Futures Pública
-        # Fuente 4: CoinGecko (Lenta pero segura contra bloqueos de IP)
+        """Intenta obtener el precio de 5 fuentes distintas para vencer el bloqueo de IP."""
         sources = [
             "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
             "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT",
-            "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT",
-            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+            "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+            "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
+            "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT"
         ]
         
         for url in sources:
             try:
-                res = requests.get(url, timeout=2).json()
+                res = requests.get(url, timeout=1.5).json()
+                # Lógica de extracción según la API que responda
                 if 'price' in res: return float(res['price'])
-                if 'result' in res: return float(res['result']['list'][0]['lastPrice'])
-                if 'bitcoin' in res: return float(res['bitcoin']['usd'])
+                if 'result' in res:
+                    if 'list' in res['result']: return float(res['result']['list'][0]['lastPrice'])
+                    if 'XXBTZUSD' in res['result']: return float(res['result']['XXBTZUSD']['c'][0])
+                if 'data' in res: return float(res['data']['amount'])
             except:
                 continue
         return 0.0
 
     def _request(self, method, endpoint, params={}):
-        if not self.api_key or not self.secret_key:
-            return {"error": "Llaves no encontradas"}
+        if not self.api_key or not self.secret_key: return {"error": "Sin llaves"}
         params['timestamp'] = int(time.time() * 1000)
         query = "&".join([f"{k}={v}" for k, v in params.items()])
         signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
-        headers = {'X-MBX-APIKEY': self.api_key}
         url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
+        headers = {'X-MBX-APIKEY': self.api_key}
         try:
-            if method == 'POST': return requests.post(url, headers=headers, timeout=10).json()
-            return requests.get(url, headers=headers, timeout=10).json()
-        except: return {"error": "Fallo de conexión"}
+            if method == 'POST': return requests.post(url, headers=headers, timeout=5).json()
+            return requests.get(url, headers=headers, timeout=5).json()
+        except: return {"error": "Error de conexión"}
 
     def place_order(self, symbol, side, quantity):
         return self._request('POST', '/fapi/v1/order', {"symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity})
