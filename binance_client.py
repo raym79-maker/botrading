@@ -3,21 +3,17 @@ from datetime import datetime
 
 class BinanceClient:
     def __init__(self):
-        # Variables de Railway
         self.api_key = os.getenv("API_KEY")
         self.secret_key = os.getenv("SECRET_KEY")
         self.db_url = os.getenv("DATABASE_URL")
         self.base_url = 'https://testnet.binancefuture.com'
         
-        # Conexión Segura a la DB
         if self.db_url:
-            # Corregimos el protocolo si es necesario
             if self.db_url.startswith("postgres://"):
                 self.db_url = self.db_url.replace("postgres://", "postgresql://", 1)
             self._init_db()
 
     def _init_db(self):
-        """Crea la tabla permanente de trades."""
         try:
             conn = psycopg2.connect(self.db_url)
             cur = conn.cursor()
@@ -35,10 +31,9 @@ class BinanceClient:
             cur.close()
             conn.close()
         except Exception as e:
-            print(f"Error inicializando DB: {e}")
+            print(f"Error DB: {e}")
 
     def get_price(self, symbol="BTCUSDT"):
-        """Estrategia de 4 fuentes para evitar el 0.00 en Railway."""
         sources = [
             f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
             f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}",
@@ -55,7 +50,6 @@ class BinanceClient:
         return 0.0
 
     def get_account_status(self):
-        """Resumen de cuenta: Billetera, PNL Flotante y Patrimonio (Equity)."""
         res = self._request('GET', '/fapi/v2/account')
         if isinstance(res, dict) and 'totalWalletBalance' in res:
             return {
@@ -88,7 +82,6 @@ class BinanceClient:
         return None
 
     def registrar_trade(self, side, entry, exit, pnl):
-        """Inserta el trade en PostgreSQL."""
         if not self.db_url: return
         try:
             conn = psycopg2.connect(self.db_url)
@@ -104,12 +97,24 @@ class BinanceClient:
             print(f"Error al registrar: {e}")
 
     def obtener_historial_db(self):
-        """Lee los últimos 10 trades de la base de datos."""
         if not self.db_url: return None
         import pandas as pd
         try:
             conn = psycopg2.connect(self.db_url)
-            df = pd.read_sql("SELECT fecha, lado, entrada, salida, pnl FROM trades ORDER BY fecha DESC LIMIT 10", conn)
+            df = pd.read_sql("SELECT fecha, lado, entrada, salida, pnl FROM trades ORDER BY fecha DESC", conn)
             conn.close()
             return df
         except: return None
+
+    def borrar_historial_db(self):
+        """Limpia todos los registros de la tabla trades."""
+        if not self.db_url: return
+        try:
+            conn = psycopg2.connect(self.db_url)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM trades")
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+        except: return False
