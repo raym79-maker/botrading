@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-st.set_page_config(page_title="Terminal Pro - Full Safety", layout="wide")
+st.set_page_config(page_title="Terminal Pro - Centinela", layout="wide")
 client = BinanceClient()
 
 # --- INICIALIZACIÓN DE ESTADOS ---
@@ -13,7 +13,7 @@ if 'max_price' not in st.session_state:
 if 'ultima_alerta_vida' not in st.session_state:
     st.session_state.ultima_alerta_vida = datetime.now()
 
-st.title("🤖 Terminal Trading - ESTRATEGIA + HEARTBEAT")
+st.title("🤖 Terminal Trading - VIGILANCIA 3H")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
@@ -92,19 +92,19 @@ else:
             if rsi < 35 and precio_actual > ema:
                 client.place_order("BTCUSDT", "BUY", str(cantidad_op))
                 client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*\nInversión: `{usdt_riesgo} USDT`")
-                st.session_state.ultima_alerta_vida = datetime.now() # Resetear reloj
+                st.session_state.ultima_alerta_vida = datetime.now()
                 st.rerun()
             elif rsi > 55 and precio_actual < ema:
                 client.place_order("BTCUSDT", "SELL", str(cantidad_op))
                 client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*\nInversión: `{usdt_riesgo} USDT`")
-                st.session_state.ultima_alerta_vida = datetime.now() # Resetear reloj
+                st.session_state.ultima_alerta_vida = datetime.now()
                 st.rerun()
             
-            # --- LÓGICA DE ALERTA DE INACTIVIDAD (HEARTBEAT) ---
+            # --- CORRECCIÓN: ALERTA CADA 3 HORAS ---
             tiempo_transcurrido = datetime.now() - st.session_state.ultima_alerta_vida
-            if tiempo_transcurrido > timedelta(hours=6):
-                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nEstado: `Vigilando` 🧐\nBTC: `${precio_actual:,.2f}`\nRSI: `{rsi:.2f}`\nNo se han encontrado entradas en las últimas 6 horas.")
-                st.session_state.ultima_alerta_vida = datetime.now() # Actualizar para la siguiente alerta
+            if tiempo_transcurrido > timedelta(hours=3):
+                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nEstado: `Vigilando` 🧐\nBTC: `${precio_actual:,.2f}`\nRSI: `{rsi:.2f}`\nSin entradas en las últimas 3 horas.")
+                st.session_state.ultima_alerta_vida = datetime.now()
 
 # --- BOTONES ---
 st.divider()
