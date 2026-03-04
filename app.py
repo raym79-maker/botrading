@@ -14,11 +14,9 @@ if 'precio_anterior' not in st.session_state:
 tendencia_emoji = "🟢" if precio_actual > st.session_state.precio_anterior else "🔴" if precio_actual < st.session_state.precio_anterior else "⚪"
 st.session_state.precio_anterior = precio_actual
 
-# Título de la pestaña con precio y emoji
 titulo_tab = f"{tendencia_emoji} ${precio_actual:,.0f} | Bot"
 st.set_page_config(page_title=titulo_tab, layout="wide")
 
-# --- INICIALIZACIÓN DE ESTADOS ---
 if 'max_price' not in st.session_state: 
     st.session_state.max_price = 0.0
 if 'ultima_alerta_vida' not in st.session_state:
@@ -33,23 +31,14 @@ with st.sidebar:
     st.metric("Equity", f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} PNL")
     
     st.divider()
-    st.header("⚖️ Riesgo")
     lev = st.slider("Apalancamiento (x)", 1, 125, 20)
-    if st.button("Aplicar"):
-        client.set_leverage("BTCUSDT", lev)
-        st.success(f"Ajustado a {lev}x")
-
-    st.divider()
-    st.header("⚙️ Config")
     usdt_riesgo = st.number_input("USDT Margen", value=50.0, step=10.0)
     tp_input = st.number_input("Take Profit", value=0.0)
     sl_input = st.number_input("Stop Loss", value=0.0)
     
     st.divider()
-    st.subheader("🛡️ Protecciones")
     use_trailing = st.checkbox("Trailing Stop", value=True)
     distancia_ts = st.number_input("Distancia (USDT)", value=500.0)
-    
     auto_mode = st.toggle("🚀 AUTO", value=True)
     
     c1, c2 = st.columns(2)
@@ -72,9 +61,10 @@ if posicion:
         pnl_valor = (precio_actual - entry_p) * tamano if side == "LONG" else (entry_p - precio_actual) * tamano
         pnl_pct = (pnl_valor / (entry_p * tamano / lev)) * 100 if entry_p > 0 else 0
         ind = "🟢" if pnl_valor >= 0 else "🔴"
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {ind} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
+        
+        # --- LÍNEA CORREGIDA: INCLUYE PRECIO DE ENTRADA ---
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {ind} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
 
-        # Trailing Stop
         if use_trailing:
             if st.session_state.max_price == 0: st.session_state.max_price = precio_actual
             if side == "LONG":
@@ -91,7 +81,6 @@ if posicion:
                     client.registrar_trade(side, entry_p, precio_actual, pnl_valor)
                     client.enviar_telegram(f"🛡️ *CIERRE TRAILING (SHORT)*\nPNL: `{pnl_valor:.2f} USDT`")
                     st.session_state.max_price = 0 ; st.rerun()
-
 else:
     st.session_state.max_price = 0
     if precio_actual > 0:
@@ -106,11 +95,10 @@ else:
                 client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*")
                 st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
             
-            # --- HEARTBEAT TEST (1 MINUTO) ---
-            tiempo_transcurrido = datetime.now() - st.session_state.ultima_alerta_vida
-    if tiempo_transcurrido > timedelta(hours=2):
-        client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`\nEstado: Vigilando mercado... 🧐")
-        st.session_state.ultima_alerta_vida = datetime.now()
+            # Heartbeat 3h
+            if (datetime.now() - st.session_state.ultima_alerta_vida) > timedelta(hours=3):
+                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`")
+                st.session_state.ultima_alerta_vida = datetime.now()
 
 # --- BOTONES ---
 st.divider()
@@ -142,4 +130,3 @@ df = client.obtener_historial_db()
 if df is not None and not df.empty: st.table(df)
 
 time.sleep(2); st.rerun()
-
