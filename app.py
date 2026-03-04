@@ -5,13 +5,26 @@ import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
 # --- PRE-CÁLCULO PARA EL TÍTULO DINÁMICO ---
-# Instanciamos el cliente antes de configurar la página para obtener el precio
 client = BinanceClient()
 rsi, ema, precio_actual = client.get_indicators()
 
-# Configuramos la página con el precio en el título
-# El formato :,.0f mostrará el precio como "72,654" para que sea legible en la pestaña
-titulo_tab = f"Bot ${precio_actual:,.0f}" if precio_actual > 0 else "Bot Conectando..."
+# Inicializar precio anterior en la memoria de la sesión
+if 'precio_anterior' not in st.session_state:
+    st.session_state.precio_anterior = precio_actual
+
+# Lógica del Emoji de Tendencia
+if precio_actual > st.session_state.precio_anterior:
+    tendencia_emoji = "🟢"
+elif precio_actual < st.session_state.precio_anterior:
+    tendencia_emoji = "🔴"
+else:
+    tendencia_emoji = "⚪" # Precio estable
+
+# Actualizamos el precio anterior para la siguiente vuelta
+st.session_state.precio_anterior = precio_actual
+
+# Configuración del título dinámico
+titulo_tab = f"{tendencia_emoji} ${precio_actual:,.0f} | Bot"
 st.set_page_config(page_title=titulo_tab, layout="wide")
 
 # --- INICIALIZACIÓN DE ESTADOS ---
@@ -20,42 +33,39 @@ if 'max_price' not in st.session_state:
 if 'ultima_alerta_vida' not in st.session_state:
     st.session_state.ultima_alerta_vida = datetime.now()
 
-st.title(f"🤖 Terminal Trading - {titulo_tab}")
+st.title(f"🤖 Terminal Trading - BTC: ${precio_actual:,.2f}")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
-    st.header("💰 Estado de Cuenta")
+    st.header("💰 Cuenta")
     info = client.get_account_status()
     st.metric("Equity", f"{info['equity']:,.2f} USDT", delta=f"{info['unrealized_pnl']:,.2f} PNL")
     
     st.divider()
-    st.header("⚖️ Gestión de Riesgo")
+    st.header("⚖️ Riesgo")
     lev = st.slider("Apalancamiento (x)", 1, 125, 20)
-    if st.button("Aplicar Apalancamiento"):
+    if st.button("Aplicar"):
         client.set_leverage("BTCUSDT", lev)
         st.success(f"Ajustado a {lev}x")
 
     st.divider()
-    st.header("⚙️ Configuración")
-    usdt_riesgo = st.number_input("USDT POR OPERACIÓN (Margen)", value=50.0, step=10.0)
-    tp_input = st.number_input("Take Profit (Precio)", value=0.0)
-    sl_input = st.number_input("Stop Loss (Precio)", value=0.0)
+    st.header("⚙️ Config")
+    usdt_riesgo = st.number_input("USDT Margen", value=50.0, step=10.0)
+    tp_input = st.number_input("Take Profit", value=0.0)
+    sl_input = st.number_input("Stop Loss", value=0.0)
     
     st.divider()
-    st.subheader("🛡️ Protecciones Dinámicas")
-    use_trailing = st.checkbox("Activar Trailing Stop", value=True)
-    distancia_ts = st.number_input("Distancia Trailing (USDT)", value=500.0)
+    st.subheader("🛡️ Protecciones")
+    use_trailing = st.checkbox("Trailing Stop", value=True)
+    distancia_ts = st.number_input("Distancia (USDT)", value=500.0)
     
-    st.divider()
-    auto_mode = st.toggle("🚀 ESTRATEGIA AUTO", value=True)
+    auto_mode = st.toggle("🚀 AUTO", value=True)
     
-    # Mostramos los indicadores en el sidebar
     c1, c2 = st.columns(2)
-    c1.metric("RSI (14)", f"{rsi if rsi > 0 else '...'}")
-    c2.metric("EMA (20)", f"{ema if ema > 0 else '...'}")
-    st.metric("BTC Precio Actual", f"{precio_actual:,.2f} USDT")
+    c1.metric("RSI", f"{rsi if rsi > 0 else '...'}")
+    c2.metric("EMA", f"{int(ema) if ema > 0 else '...'}")
 
-# --- GRÁFICO ---
+# --- GRÁFICO XL ---
 components.html(f"""<div style="height:600px;"><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart", "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]}});</script><div id="tv_chart"></div></div>""", height=600)
 
 # --- LÓGICA DE POSICIÓN ---
@@ -70,8 +80,8 @@ if posicion:
     if precio_actual > 0:
         pnl_valor = (precio_actual - entry_p) * tamano if side == "LONG" else (entry_p - precio_actual) * tamano
         pnl_pct = (pnl_valor / (entry_p * tamano / lev)) * 100 if entry_p > 0 else 0
-        indicador = "🟢" if pnl_valor >= 0 else "🔴"
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {indicador} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
+        ind = "🟢" if pnl_valor >= 0 else "🔴"
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {ind} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
 
         if use_trailing:
             if st.session_state.max_price == 0: st.session_state.max_price = precio_actual
@@ -94,50 +104,45 @@ else:
     st.session_state.max_price = 0
     if precio_actual > 0:
         cantidad_op = round((usdt_riesgo * lev) / precio_actual, 3)
-        
         if auto_mode and rsi > 0:
             if rsi < 35 and precio_actual > ema:
                 client.place_order("BTCUSDT", "BUY", str(cantidad_op))
-                client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*\nInversión: `{usdt_riesgo} USDT`")
+                client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*")
                 st.session_state.ultima_alerta_vida = datetime.now()
                 st.rerun()
             elif rsi > 55 and precio_actual < ema:
                 client.place_order("BTCUSDT", "SELL", str(cantidad_op))
-                client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*\nInversión: `{usdt_riesgo} USDT`")
+                client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*")
                 st.session_state.ultima_alerta_vida = datetime.now()
                 st.rerun()
             
-            # --- HEARTBEAT CADA 3 HORAS ---
-            tiempo_transcurrido = datetime.now() - st.session_state.ultima_alerta_vida
-            if tiempo_transcurrido > timedelta(hours=3):
-                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`\nRSI: `{rsi:.2f}`")
+            # Heartbeat 3h
+            if (datetime.now() - st.session_state.ultima_alerta_vida) > timedelta(hours=3):
+                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`")
                 st.session_state.ultima_alerta_vida = datetime.now()
 
 # --- BOTONES ---
 st.divider()
 c1, c2, c3 = st.columns(3)
 if precio_actual > 0:
-    cantidad_manual = round((usdt_riesgo * lev) / precio_actual, 3)
+    cant_m = round((usdt_riesgo * lev) / precio_actual, 3)
 
 if c1.button("🟢 MANUAL LONG"):
-    client.place_order("BTCUSDT", "BUY", str(cantidad_manual))
+    client.place_order("BTCUSDT", "BUY", str(cant_m))
     client.enviar_telegram(f"🚀 *ENTRADA MANUAL (LONG)*")
-    st.session_state.ultima_alerta_vida = datetime.now()
-    st.rerun()
+    st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
 
 if c2.button("🔴 MANUAL SHORT"):
-    client.place_order("BTCUSDT", "SELL", str(cantidad_manual))
+    client.place_order("BTCUSDT", "SELL", str(cant_m))
     client.enviar_telegram(f"📉 *ENTRADA MANUAL (SHORT)*")
-    st.session_state.ultima_alerta_vida = datetime.now()
-    st.rerun()
+    st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
 
 if c3.button("⛔ CERRAR POSICIÓN"):
     if posicion:
         client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
         client.registrar_trade(side, entry_p, precio_actual, pnl_valor)
         client.enviar_telegram(f"⛔ *CIERRE MANUAL*\nPNL: `{pnl_valor:.2f} USDT`")
-        st.session_state.ultima_alerta_vida = datetime.now()
-        st.rerun()
+        st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
 
 # --- HISTORIAL ---
 st.divider()
