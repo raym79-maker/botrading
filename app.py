@@ -104,17 +104,28 @@ else:
             client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*\nPrecio: `{precio_actual}`\nRSI: `{rsi}`")
             st.rerun()
 
-# --- BOTONES ---
+# --- BOTONES DE EJECUCIÓN ---
 st.divider()
-if st.button("⛔ CERRAR POSICIÓN MANUAL"):
+col1, col2, col3 = st.columns(3)
+
+if col1.button("🟢 MANUAL LONG"):
+    res = client.place_order("BTCUSDT", "BUY", str(cantidad))
+    if "orderId" in res:
+        client.enviar_telegram(f"🚀 *ENTRADA MANUAL (LONG)*\nPrecio: `{precio_actual}`\nCantidad: `{cantidad}` BTC")
+        st.success("Orden Long ejecutada")
+        st.rerun()
+
+if col2.button("🔴 MANUAL SHORT"):
+    res = client.place_order("BTCUSDT", "SELL", str(cantidad))
+    if "orderId" in res:
+        client.enviar_telegram(f"📉 *ENTRADA MANUAL (SHORT)*\nPrecio: `{precio_actual}`\nCantidad: `{cantidad}` BTC")
+        st.success("Orden Short ejecutada")
+        st.rerun()
+
+if col3.button("⛔ CERRAR POSICIÓN"):
     if posicion:
         client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
         client.registrar_trade(side, entry_p, precio_actual, pnl_valor)
-        client.enviar_telegram(f"⛔ *CIERRE MANUAL*\nPNL: `{pnl_valor:.2f} USDT`")
+        client.enviar_telegram(f"⛔ *CIERRE MANUAL*\nPNL: `{pnl_valor:.2f} USDT`\nPrecio: `{precio_actual}`")
         st.rerun()
 
-st.subheader("📋 Historial (PostgreSQL)")
-df = client.obtener_historial_db()
-if df is not None: st.table(df)
-
-time.sleep(2); st.rerun()
