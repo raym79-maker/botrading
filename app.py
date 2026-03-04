@@ -32,7 +32,7 @@ with st.sidebar:
     st.divider()
     st.subheader("🛡️ Protecciones Dinámicas")
     use_trailing = st.checkbox("Activar Trailing Stop", value=True)
-    distancia_ts = st.number_input("Distancia Trailing (USDT)", value=150.0)
+    distancia_ts = st.number_input("Distancia Trailing (USDT)", value=600.0)
     
     st.divider()
     auto_mode = st.toggle("🚀 ESTRATEGIA AUTO", value=True)
@@ -126,3 +126,4 @@ df = client.obtener_historial_db()
 if df is not None and not df.empty: st.table(df)
 
 time.sleep(2); st.rerun()
+
