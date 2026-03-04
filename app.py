@@ -3,12 +3,12 @@ import time, os
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-st.set_page_config(page_title="Terminal Pro - USDT Risk Mode", layout="wide")
+st.set_page_config(page_title="Terminal Pro - Estrategia Optimizada", layout="wide")
 client = BinanceClient()
 
 if 'max_price' not in st.session_state: st.session_state.max_price = 0.0
 
-st.title("🤖 Terminal Trading - GESTIÓN POR USDT")
+st.title("🤖 Terminal Trading - RSI OPTIMIZADO")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
@@ -25,7 +25,6 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Configuración")
-    # CAMBIO: Ahora defines cuánto dinero (USDT) quieres poner en juego
     usdt_riesgo = st.number_input("USDT POR OPERACIÓN (Margen)", value=50.0, step=10.0)
     tp_input = st.number_input("Take Profit (Precio)", value=0.0)
     sl_input = st.number_input("Stop Loss (Precio)", value=0.0)
@@ -33,7 +32,7 @@ with st.sidebar:
     st.divider()
     st.subheader("🛡️ Protecciones Dinámicas")
     use_trailing = st.checkbox("Activar Trailing Stop", value=True)
-    # CAMBIO: Ahora el valor por defecto es 500.0
+    # AJUSTE: Iniciamos siempre en 500 para evitar sustos
     distancia_ts = st.number_input("Distancia Trailing (USDT)", value=500.0)
     
     st.divider()
@@ -41,6 +40,7 @@ with st.sidebar:
     
     rsi, ema, precio_actual = client.get_indicators()
     c1, c2 = st.columns(2)
+    # Visualización de indicadores
     c1.metric("RSI (14)", f"{rsi if rsi > 0 else '...'}")
     c2.metric("EMA (20)", f"{ema if ema > 0 else '...'}")
     st.metric("BTC Precio Actual", f"{precio_actual:,.2f} USDT")
@@ -63,7 +63,7 @@ if posicion:
         indicador = "🟢" if pnl_valor >= 0 else "🔴"
         st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {indicador} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
 
-        # Lógica de cierres (TP/SL/Trailing)
+        # Cierres (TP/SL/Trailing)
         if use_trailing:
             if st.session_state.max_price == 0: st.session_state.max_price = precio_actual
             if side == "LONG":
@@ -83,24 +83,24 @@ if posicion:
 
 else:
     st.session_state.max_price = 0
-    # Cálculo dinámico de cantidad basado en USDT
     if precio_actual > 0:
-        cantidad_auto = round((usdt_riesgo * lev) / precio_actual, 3)
+        cantidad_op = round((usdt_riesgo * lev) / precio_actual, 3)
         
         if auto_mode and rsi > 0:
+            # LONG: RSI bajo (<35) y precio sobre la EMA
             if rsi < 35 and precio_actual > ema:
-                client.place_order("BTCUSDT", "BUY", str(cantidad_auto))
-                client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*\nInversión: `{usdt_riesgo} USDT`")
+                client.place_order("BTCUSDT", "BUY", str(cantidad_op))
+                client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*\nInversión: `{usdt_riesgo} USDT` (RSI: {rsi})")
                 st.rerun()
-            elif rsi > 65 and precio_actual < ema:
-                client.place_order("BTCUSDT", "SELL", str(cantidad_auto))
-                client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*\nInversión: `{usdt_riesgo} USDT`")
+            # SHORT OPTIMIZADO: RSI > 55 (antes 65) y precio bajo la EMA
+            elif rsi > 55 and precio_actual < ema:
+                client.place_order("BTCUSDT", "SELL", str(cantidad_op))
+                client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*\nInversión: `{usdt_riesgo} USDT` (RSI: {rsi})")
                 st.rerun()
 
 # --- BOTONES ---
 st.divider()
 c1, c2, c3 = st.columns(3)
-# Cálculo para manuales
 if precio_actual > 0:
     cantidad_manual = round((usdt_riesgo * lev) / precio_actual, 3)
 
