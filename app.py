@@ -108,9 +108,9 @@ else:
             
             # --- HEARTBEAT TEST (1 MINUTO) ---
             tiempo_transcurrido = datetime.now() - st.session_state.ultima_alerta_vida
-            if tiempo_transcurrido > timedelta(minutes=1):
-                client.enviar_telegram(f"💓 *HEARTBEAT TEST (1 MIN)*\nBTC: `${precio_actual:,.2f}`\nEstado: Vigilando...")
-                st.session_state.ultima_alerta_vida = datetime.now()
+    if tiempo_transcurrido > timedelta(hours=2):
+        client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`\nEstado: Vigilando mercado... 🧐")
+        st.session_state.ultima_alerta_vida = datetime.now()
 
 # --- BOTONES ---
 st.divider()
@@ -142,3 +142,4 @@ df = client.obtener_historial_db()
 if df is not None and not df.empty: st.table(df)
 
 time.sleep(2); st.rerun()
+
