@@ -8,22 +8,13 @@ from binance_client import BinanceClient
 client = BinanceClient()
 rsi, ema, precio_actual = client.get_indicators()
 
-# Inicializar precio anterior en la memoria de la sesión
 if 'precio_anterior' not in st.session_state:
     st.session_state.precio_anterior = precio_actual
 
-# Lógica del Emoji de Tendencia
-if precio_actual > st.session_state.precio_anterior:
-    tendencia_emoji = "🟢"
-elif precio_actual < st.session_state.precio_anterior:
-    tendencia_emoji = "🔴"
-else:
-    tendencia_emoji = "⚪" # Precio estable
-
-# Actualizamos el precio anterior para la siguiente vuelta
+tendencia_emoji = "🟢" if precio_actual > st.session_state.precio_anterior else "🔴" if precio_actual < st.session_state.precio_anterior else "⚪"
 st.session_state.precio_anterior = precio_actual
 
-# Configuración del título dinámico
+# Título de la pestaña con precio y emoji
 titulo_tab = f"{tendencia_emoji} ${precio_actual:,.0f} | Bot"
 st.set_page_config(page_title=titulo_tab, layout="wide")
 
@@ -33,7 +24,7 @@ if 'max_price' not in st.session_state:
 if 'ultima_alerta_vida' not in st.session_state:
     st.session_state.ultima_alerta_vida = datetime.now()
 
-st.title(f"🤖 Terminal Trading - BTC: ${precio_actual:,.2f}")
+st.title(f"🤖 Terminal Pro - BTC: ${precio_actual:,.2f}")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
@@ -65,8 +56,8 @@ with st.sidebar:
     c1.metric("RSI", f"{rsi if rsi > 0 else '...'}")
     c2.metric("EMA", f"{int(ema) if ema > 0 else '...'}")
 
-# --- GRÁFICO XL ---
-components.html(f"""<div style="height:600px;"><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart", "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]}});</script><div id="tv_chart"></div></div>""", height=600)
+# --- GRÁFICO ---
+components.html(f"""<div style="height:500px;"><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart", "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]}});</script><div id="tv_chart"></div></div>""", height=500)
 
 # --- LÓGICA DE POSICIÓN ---
 posicion = client.get_open_positions("BTCUSDT")
@@ -81,8 +72,9 @@ if posicion:
         pnl_valor = (precio_actual - entry_p) * tamano if side == "LONG" else (entry_p - precio_actual) * tamano
         pnl_pct = (pnl_valor / (entry_p * tamano / lev)) * 100 if entry_p > 0 else 0
         ind = "🟢" if pnl_valor >= 0 else "🔴"
-        st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: {ind} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
+        st.warning(f"**POSICIÓN ACTIVA: {side}** | PNL: {ind} **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
 
+        # Trailing Stop
         if use_trailing:
             if st.session_state.max_price == 0: st.session_state.max_price = precio_actual
             if side == "LONG":
@@ -108,17 +100,16 @@ else:
             if rsi < 35 and precio_actual > ema:
                 client.place_order("BTCUSDT", "BUY", str(cantidad_op))
                 client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*")
-                st.session_state.ultima_alerta_vida = datetime.now()
-                st.rerun()
+                st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
             elif rsi > 55 and precio_actual < ema:
                 client.place_order("BTCUSDT", "SELL", str(cantidad_op))
                 client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*")
-                st.session_state.ultima_alerta_vida = datetime.now()
-                st.rerun()
+                st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
             
-            # Heartbeat 3h
-            if (datetime.now() - st.session_state.ultima_alerta_vida) > timedelta(hours=3):
-                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`")
+            # --- HEARTBEAT TEST (1 MINUTO) ---
+            tiempo_transcurrido = datetime.now() - st.session_state.ultima_alerta_vida
+            if tiempo_transcurrido > timedelta(minutes=1):
+                client.enviar_telegram(f"💓 *HEARTBEAT TEST (1 MIN)*\nBTC: `${precio_actual:,.2f}`\nEstado: Vigilando...")
                 st.session_state.ultima_alerta_vida = datetime.now()
 
 # --- BOTONES ---
