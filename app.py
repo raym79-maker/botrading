@@ -4,8 +4,15 @@ from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-st.set_page_config(page_title="Terminal Pro - Centinela", layout="wide")
+# --- PRE-CÁLCULO PARA EL TÍTULO DINÁMICO ---
+# Instanciamos el cliente antes de configurar la página para obtener el precio
 client = BinanceClient()
+rsi, ema, precio_actual = client.get_indicators()
+
+# Configuramos la página con el precio en el título
+# El formato :,.0f mostrará el precio como "72,654" para que sea legible en la pestaña
+titulo_tab = f"Bot ${precio_actual:,.0f}" if precio_actual > 0 else "Bot Conectando..."
+st.set_page_config(page_title=titulo_tab, layout="wide")
 
 # --- INICIALIZACIÓN DE ESTADOS ---
 if 'max_price' not in st.session_state: 
@@ -13,7 +20,7 @@ if 'max_price' not in st.session_state:
 if 'ultima_alerta_vida' not in st.session_state:
     st.session_state.ultima_alerta_vida = datetime.now()
 
-st.title("🤖 Terminal Trading - VIGILANCIA 3H")
+st.title(f"🤖 Terminal Trading - {titulo_tab}")
 
 # --- PANEL LATERAL ---
 with st.sidebar:
@@ -42,7 +49,7 @@ with st.sidebar:
     st.divider()
     auto_mode = st.toggle("🚀 ESTRATEGIA AUTO", value=True)
     
-    rsi, ema, precio_actual = client.get_indicators()
+    # Mostramos los indicadores en el sidebar
     c1, c2 = st.columns(2)
     c1.metric("RSI (14)", f"{rsi if rsi > 0 else '...'}")
     c2.metric("EMA (20)", f"{ema if ema > 0 else '...'}")
@@ -100,10 +107,10 @@ else:
                 st.session_state.ultima_alerta_vida = datetime.now()
                 st.rerun()
             
-            # --- CORRECCIÓN: ALERTA CADA 3 HORAS ---
+            # --- HEARTBEAT CADA 3 HORAS ---
             tiempo_transcurrido = datetime.now() - st.session_state.ultima_alerta_vida
             if tiempo_transcurrido > timedelta(hours=3):
-                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nEstado: `Vigilando` 🧐\nBTC: `${precio_actual:,.2f}`\nRSI: `{rsi:.2f}`\nSin entradas en las últimas 3 horas.")
+                client.enviar_telegram(f"💓 *HEARTBEAT: BOT ACTIVO*\nBTC: `${precio_actual:,.2f}`\nRSI: `{rsi:.2f}`")
                 st.session_state.ultima_alerta_vida = datetime.now()
 
 # --- BOTONES ---
