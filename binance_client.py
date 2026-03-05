@@ -78,28 +78,25 @@ class BinanceClient:
         return None
 
     def registrar_trade(self, side, entry_p, exit_p, pnl):
-    try:
-        # 1. Conectar a la DB (Usa tu variable de entorno de Railway)
-        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-        cur = conn.cursor()
-        
-        # 2. Insertar los datos (Asegúrate de que los nombres de columnas coincidan)
-        query = """
-            INSERT INTO trades (fecha, simbolo, lado, precio_entrada, precio_salida, pnl)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        valores = (datetime.now(), "BTCUSDT", side, entry_p, exit_p, pnl)
-        
-        cur.execute(query, valores)
-        
-        # --- ESTA ES LA LÍNEA CRÍTICA QUE SUELE FALTAR ---
-        conn.commit() 
-        
-        cur.close()
-        conn.close()
-        print("✅ Trade guardado con éxito en PostgreSQL")
-    except Exception as e:
-        print(f"❌ Error al guardar trade: {e}")
+        try: # <--- Esta línea debe estar indentada (4 espacios)
+            conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+            cur = conn.cursor()
+            
+            query = """
+                INSERT INTO trades (fecha, simbolo, lado, precio_entrada, precio_salida, pnl)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            valores = (datetime.now(), "BTCUSDT", side, entry_p, exit_p, pnl)
+            
+            cur.execute(query, valores)
+            conn.commit()  # Confirma el guardado permanente
+            
+            cur.close()
+            conn.close()
+            return True # Para que app.py sepa que se guardó
+        except Exception as e:
+            print(f"Error en la DB: {e}")
+            return False
 
     def obtener_historial_db(self):
         if not self.db_url: return None
@@ -117,4 +114,5 @@ class BinanceClient:
             cur.execute("CREATE TABLE IF NOT EXISTS trades (id SERIAL PRIMARY KEY, fecha TIMESTAMP, lado TEXT, entrada FLOAT, salida FLOAT, pnl FLOAT)")
             conn.commit(); cur.close(); conn.close()
         except: pass
+
 
