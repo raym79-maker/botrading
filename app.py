@@ -4,26 +4,25 @@ from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-# 1. DATOS INICIALES Y CONFIGURACIÓN DE PÁGINA
+# 1. DATOS INICIALES
 client = BinanceClient()
 rsi, ema, precio_actual = client.get_indicators()
 
 if 'precio_anterior' not in st.session_state:
     st.session_state.precio_anterior = precio_actual
 
-# Título dinámico con tendencia en la pestaña
 tendencia = "🟢" if precio_actual > st.session_state.precio_anterior else "🔴" if precio_actual < st.session_state.precio_anterior else "⚪"
 st.session_state.precio_anterior = precio_actual
 st.set_page_config(page_title=f"{tendencia} ${precio_actual:,.0f} | Bot", layout="wide")
 
-# 2. INICIALIZACIÓN DE ESTADOS DE SESIÓN (Memoria del Bot)
+# 2. ESTADOS DE SESIÓN (Persistencia de alertas y tiempo)
 if 'max_price' not in st.session_state: st.session_state.max_price = 0.0
 if 'ultima_alerta_vida' not in st.session_state: st.session_state.ultima_alerta_vida = datetime.now()
 if 'estado_actual' not in st.session_state: st.session_state.estado_actual = "NEUTRAL"
 
 st.title(f"🤖 Terminal Pro - BTC: ${precio_actual:,.2f}")
 
-# --- PANEL LATERAL (DIAGNÓSTICO Y ALERTAS TELEGRAM) ---
+# --- PANEL LATERAL (DIAGNÓSTICO Y ALARMAS) ---
 with st.sidebar:
     st.header("💰 Cuenta")
     info = client.get_account_status()
@@ -31,6 +30,11 @@ with st.sidebar:
     
     st.divider()
     st.header("📡 Diagnóstico y Alarmas")
+    
+    # 👇 ESTE ES EL CONTEO DE 1 HORA (REINTEGRADO Y VISIBLE)
+    t_restante = timedelta(hours=1) - (datetime.now() - st.session_state.ultima_alerta_vida)
+    mins_faltantes = int(max(0, t_restante.total_seconds() / 60))
+    st.info(f"⌛ Próximo reporte de vida en: **{mins_faltantes} min**")
     
     # Lógica de estados para Telegram
     nuevo_estado = ""
@@ -47,7 +51,7 @@ with st.sidebar:
             st.success(msg_diag)
         else:
             nuevo_estado = "FILTRO_LONG"
-            msg_diag = f"🔴 **Filtro EMA:** RSI listo para LONG (35), pero el precio (${precio_actual:,.0f}) está bajo la EMA."
+            msg_diag = f"🔴 **Filtro EMA:** RSI listo para LONG (35), pero el precio está bajo la EMA."
             st.warning(msg_diag)
     elif rsi >= 55:
         if precio_actual < ema:
@@ -56,10 +60,10 @@ with st.sidebar:
             st.success(msg_diag)
         else:
             nuevo_estado = "FILTRO_SHORT"
-            msg_diag = f"🔴 **Filtro EMA:** RSI listo para SHORT (55), pero el precio (${precio_actual:,.0f}) está sobre la EMA."
+            msg_diag = f"🔴 **Filtro EMA:** RSI listo para SHORT (55), pero el precio está sobre la EMA."
             st.warning(msg_diag)
 
-    # Solo envía Telegram si el estado cambia (Evita spam)
+    # Envío automático por cambio de estado
     if nuevo_estado != st.session_state.estado_actual:
         client.enviar_telegram(msg_diag)
         st.session_state.estado_actual = nuevo_estado
@@ -84,7 +88,7 @@ with st.sidebar:
 # --- GRÁFICO ---
 components.html(f"""<div style="height:500px;"><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark", "container_id": "tv_chart", "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]}});</script><div id="tv_chart"></div></div>""", height=500)
 
-# --- LÓGICA DE POSICIÓN ACTIVA ---
+# --- LÓGICA DE POSICIÓN ACTIVA Y CIERRES ---
 posicion = client.get_open_positions("BTCUSDT")
 pnl_valor = 0.0
 
@@ -98,7 +102,7 @@ if posicion:
         pnl_pct = (pnl_valor / (entry_p * tamano / lev)) * 100 if entry_p > 0 else 0
         st.warning(f"**POSICIÓN ACTIVA: {side}** | Entrada: **{entry_p:,.2f}** | PNL: **{pnl_valor:,.4f} USDT** ({pnl_pct:.2f}%)")
 
-        # Cierres por Take Profit o Stop Loss manual
+        # Cierres por TP/SL
         if (side == "LONG" and ((tp_input > 0 and precio_actual >= tp_input) or (sl_input > 0 and precio_actual <= sl_input))) or \
            (side == "SHORT" and ((tp_input > 0 and precio_actual <= tp_input) or (sl_input > 0 and precio_actual >= sl_input))):
             client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
@@ -106,7 +110,7 @@ if posicion:
             client.enviar_telegram(f"🎯 *CIERRE POR LÍMITE*\nPNL: `{pnl_valor:.2f} USDT`")
             st.rerun()
 
-        # Lógica de Trailing Stop
+        # Trailing Stop
         if use_trailing:
             if st.session_state.max_price == 0: st.session_state.max_price = precio_actual
             if side == "LONG":
@@ -124,51 +128,46 @@ if posicion:
                     client.enviar_telegram(f"🛡️ *CIERRE TRAILING (SHORT)*\nPNL: `{pnl_valor:.2f} USDT`")
                     st.session_state.max_price = 0 ; st.rerun()
 else:
-    # Lógica de Apertura Automática
+    # Lógica Apertura Automática
     st.session_state.max_price = 0
     if precio_actual > 0 and auto_mode and rsi > 0:
         cantidad_op = round((usdt_riesgo * lev) / precio_actual, 3)
         if rsi <= 35 and precio_actual > ema:
             client.place_order("BTCUSDT", "BUY", str(cantidad_op))
-            client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*\nMargen: `{usdt_riesgo} USDT`")
+            client.enviar_telegram(f"🚀 *NUEVA POSICIÓN (LONG)*")
             st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
         elif rsi >= 55 and precio_actual < ema:
             client.place_order("BTCUSDT", "SELL", str(cantidad_op))
-            client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*\nMargen: `{usdt_riesgo} USDT`")
+            client.enviar_telegram(f"📉 *NUEVA POSICIÓN (SHORT)*")
             st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
 
-# --- HEARTBEAT 30 MIN ---
+# --- HEARTBEAT 1 HORA ---
 ahora = datetime.now()
-if (ahora - st.session_state.ultima_alerta_vida) > timedelta(minutes=30):
+if (ahora - st.session_state.ultima_alerta_vida) > timedelta(hours=1):
     client.enviar_telegram(f"💓 *CENTINELA ACTIVO*\nBTC: `${precio_actual:,.2f}` | RSI: `{rsi:.2f}`")
     st.session_state.ultima_alerta_vida = ahora
 
-# --- BOTONES MANUALES ---
+# --- BOTONES Y HISTORIAL ---
 st.divider()
 c1, c2, c3 = st.columns(3)
 cant_m = round((usdt_riesgo * lev) / precio_actual, 3) if precio_actual > 0 else 0
 if c1.button("🟢 MANUAL LONG"):
     client.place_order("BTCUSDT", "BUY", str(cant_m))
-    client.enviar_telegram(f"🚀 *ENTRADA MANUAL (LONG)*")
-    st.session_state.ultima_alerta_vida = ahora ; st.rerun()
+    client.registrar_trade("LONG", precio_actual, 0, 0)
+    st.rerun()
 if c2.button("🔴 MANUAL SHORT"):
     client.place_order("BTCUSDT", "SELL", str(cant_m))
-    client.enviar_telegram(f"📉 *ENTRADA MANUAL (SHORT)*")
-    st.session_state.ultima_alerta_vida = ahora ; st.rerun()
+    client.registrar_trade("SHORT", precio_actual, 0, 0)
+    st.rerun()
 if c3.button("⛔ CERRAR POSICIÓN"):
     if posicion:
         client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
         client.registrar_trade(side, entry_p, precio_actual, pnl_valor)
-        client.enviar_telegram(f"⛔ *CIERRE MANUAL*\nPNL: `{pnl_valor:.2f} USDT`")
-        st.session_state.ultima_alerta_vida = ahora ; st.rerun()
+        st.rerun()
 
-# --- HISTORIAL (POSTGRESQL) ---
 st.divider()
 st.subheader("📋 Historial de Trades (PostgreSQL)")
 df = client.obtener_historial_db()
-if df is not None and not df.empty:
-    st.table(df)
-else:
-    st.info("Aún no hay nuevos registros en el historial.")
+if df is not None and not df.empty: st.table(df)
 
 time.sleep(2); st.rerun()
