@@ -79,10 +79,11 @@ class BinanceClient:
 
     def registrar_trade(self, side, entry_p, exit_p, pnl):
         try:
-            # Conexión a PostgreSQL (usando tu DATABASE_URL de Railway)
+            # 1. Conexión a la base de datos de Railway
             conn = psycopg2.connect(os.getenv("DATABASE_URL"))
             cur = conn.cursor()
             
+            # 2. Insertar el registro
             query = """
                 INSERT INTO trades (fecha, simbolo, lado, precio_entrada, precio_salida, pnl)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -90,13 +91,13 @@ class BinanceClient:
             valores = (datetime.now(), "BTCUSDT", side, entry_p, exit_p, pnl)
             
             cur.execute(query, valores)
-            conn.commit()  # Esto es lo que hace el guardado permanente
+            conn.commit() # Confirmar guardado
             
             cur.close()
             conn.close()
             return True
         except Exception as e:
-            print(f"Error en la base de datos: {e}")
+            print(f"❌ Error al guardar trade: {e}")
             return False
 
     def obtener_historial_db(self):
@@ -115,6 +116,7 @@ class BinanceClient:
             cur.execute("CREATE TABLE IF NOT EXISTS trades (id SERIAL PRIMARY KEY, fecha TIMESTAMP, lado TEXT, entrada FLOAT, salida FLOAT, pnl FLOAT)")
             conn.commit(); cur.close(); conn.close()
         except: pass
+
 
 
 
