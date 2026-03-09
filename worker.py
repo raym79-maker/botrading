@@ -2,73 +2,51 @@ import time, os
 from datetime import datetime, timedelta
 from binance_client import BinanceClient
 
-def ejecutar_centinela():
+def ejecutar_bot():
     client = BinanceClient()
-    print("🚀 Worker iniciado. Vigilando el mercado 24/7...")
-    
-    # Variables de control
     estado_actual = "NEUTRAL"
     ultima_alerta_vida = datetime.now()
+    print("🚀 Worker iniciado. Vigilando el mercado 24/7...")
 
     while True:
         try:
-            # 1. Obtener indicadores
             rsi, ema, precio_actual = client.get_indicators()
-            posicion = client.get_open_positions("BTCUSDT")
+            posicion = client.get_open_positions()
             
-            # 2. Lógica de Diagnóstico y Telegram
-            dist_ema = abs(precio_actual - ema)
-            nuevo_estado = ""
-            msg_diag = ""
-
-            # Definición de estados (Misma lógica que en app.py)
-            if 35 < rsi < 55:
-                nuevo_estado = "NEUTRAL"
-                msg_diag = f"🟡 RSI Neutral ({rsi:.2f}). Precio: ${precio_actual:,.2f}"
-            elif rsi <= 35:
-                if precio_actual > ema:
-                    nuevo_estado = "OPORTUNIDAD_LONG"
-                    msg_diag = f"🎯 Oportunidad LONG! RSI: {rsi:.2f}. Precio: ${precio_actual:,.2f}"
-                else:
-                    nuevo_estado = "FILTRO_LONG"
-                    msg_diag = f"🔴 Filtro EMA: Bajo la EMA por ${dist_ema:.2f}"
+            # Lógica de estados
+            nuevo_estado = "NEUTRAL"
+            if rsi <= 35:
+                nuevo_estado = "OPORTUNIDAD_LONG" if precio_actual > ema else "FILTRO_LONG"
             elif rsi >= 55:
-                if precio_actual < ema:
-                    nuevo_estado = "OPORTUNIDAD_SHORT"
-                    msg_diag = f"🎯 Oportunidad SHORT! RSI: {rsi:.2f}. Precio: ${precio_actual:,.2f}"
-                else:
-                    nuevo_estado = "FILTRO_SHORT"
-                    msg_diag = f"🔴 Filtro EMA: Sobre la EMA por ${dist_ema:.2f}"
+                nuevo_estado = "OPORTUNIDAD_SHORT" if precio_actual < ema else "FILTRO_SHORT"
 
-            # Enviar alerta por cambio de estado
+            # 1. Alerta de cambio de estado
             if nuevo_estado != estado_actual:
-                client.enviar_telegram(msg_diag)
+                client.enviar_telegram(f"📢 *ESTADO*: {nuevo_estado}\nBTC: `${precio_actual:,.2f}` | RSI: `{rsi:.2f}`")
                 estado_actual = nuevo_estado
 
-            # 3. Lógica de Trading Automático
+            # 2. Apertura Automática (Solo si no hay posición abierta)
             if not posicion:
-                # Aquí puedes leer la configuración de tu DB o usar valores fijos
-                usdt_riesgo = 50.0 
-                lev = 20
-                cantidad = round((usdt_riesgo * lev) / precio_actual, 3)
-
+                # Ajusta aquí tu riesgo fijo
+                cantidad = round((50.0 * 20) / precio_actual, 3) 
+                
                 if nuevo_estado == "OPORTUNIDAD_LONG":
                     client.place_order("BTCUSDT", "BUY", str(cantidad))
-                    client.enviar_telegram("🚀 EJECUTADO: AUTO LONG")
+                    client.enviar_telegram("🚀 *LONG EJECUTADO AUTOMÁTICAMENTE*")
                 elif nuevo_estado == "OPORTUNIDAD_SHORT":
                     client.place_order("BTCUSDT", "SELL", str(cantidad))
-                    client.enviar_telegram("📉 EJECUTADO: AUTO SHORT")
+                    client.enviar_telegram("📉 *SHORT EJECUTADO AUTOMÁTICAMENTE*")
 
-            # 4. Heartbeat (1 Hora)
+            # 3. Reporte de Vida (Cada 1 hora)
             if (datetime.now() - ultima_alerta_vida) > timedelta(hours=1):
-                client.enviar_telegram(f"💓 Worker Activo | BTC: ${precio_actual:,.2f} | RSI: {rsi:.2f}")
+                client.enviar_telegram(f"💓 *CENTINELA ACTIVO*\nBTC: `${precio_actual:,.2f}` | RSI: `{rsi:.2f}`")
                 ultima_alerta_vida = datetime.now()
 
         except Exception as e:
-            print(f"Error en el worker: {e}")
-            time.sleep(10) # Esperar un poco antes de reintentar si hay error de red
-
-        time.sleep(5) # Revisar cada 5 segundos
+            print(f"Error en el ciclo del worker: {e}")
+        
+        # Espera 15 segundos entre revisiones para no saturar la API
+        time.sleep(15)
 
 if __name__ == "__main__":
-    ejecutar_centinela()
+    ejecutar_bot()
