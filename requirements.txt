@@ -1,4 +1,7 @@
-streamlit
-requests
+python-binance
 pandas
+pandas-ta
 psycopg2-binary
+sqlalchemy
+requests
+streamlit
