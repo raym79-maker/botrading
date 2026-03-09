@@ -2,7 +2,7 @@ import time, os
 from datetime import datetime, timedelta
 from binance_client import BinanceClient
 
-def ejecutar_bot():
+def bot_permanente():
     client = BinanceClient()
     estado_previo = "NEUTRAL"
     ultima_alerta = datetime.now()
@@ -13,7 +13,7 @@ def ejecutar_bot():
             rsi, ema, precio = client.get_indicators()
             pos = client.get_open_positions()
             
-            # Lógica de estados para Trading
+            # Lógica de decisiones
             estado = "NEUTRAL"
             if rsi <= 35:
                 estado = "OPORTUNIDAD_LONG" if precio > ema else "FILTRO_LONG"
@@ -22,20 +22,19 @@ def ejecutar_bot():
 
             # 1. Alerta de cambio de estado a Telegram
             if estado != estado_previo:
-                client.enviar_telegram(f"📢 Worker Estado: *{estado}*\nBTC: `${precio:,.2f}` | RSI: `{rsi:.2f}`")
+                client.enviar_telegram(f"📢 *ESTADO*: {estado}\nPrecio: `${precio:,.2f}` | RSI: `{rsi:.2f}`")
                 estado_previo = estado
 
-            # 2. Apertura Automática (Ajuste de margen 50 USDT x20)
+            # 2. Operación Automática (Margen Fijo 50 USDT x20)
             if not pos:
                 cantidad = round((50.0 * 20) / precio, 3) 
-                
                 if estado == "OPORTUNIDAD_LONG":
                     client.place_order("BTCUSDT", "BUY", str(cantidad))
-                    client.enviar_telegram("🚀 *LONG EJECUTADO AUTOMÁTICAMENTE*")
+                    client.enviar_telegram("🚀 *LONG AUTOMÁTICO EJECUTADO*")
                     ultima_alerta = datetime.now()
                 elif estado == "OPORTUNIDAD_SHORT":
                     client.place_order("BTCUSDT", "SELL", str(cantidad))
-                    client.enviar_telegram("📉 *SHORT EJECUTADO AUTOMÁTICAMENTE*")
+                    client.enviar_telegram("📉 *SHORT AUTOMÁTICO EJECUTADO*")
                     ultima_alerta = datetime.now()
 
             # 3. Reporte de Vida cada 1 hora
@@ -44,9 +43,10 @@ def ejecutar_bot():
                 ultima_alerta = datetime.now()
 
         except Exception as e:
-            print(f"Error en el ciclo: {e}")
+            print(f"Error en el ciclo del bot: {e}")
         
+        # Espera 15 segundos entre revisiones
         time.sleep(15)
 
 if __name__ == "__main__":
-    ejecutar_bot()
+    bot_permanente()
