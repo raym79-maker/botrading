@@ -1,89 +1,90 @@
-import requests, time, hmac, hashlib, os, psycopg2
-import pandas as pd
+import os, psycopg2, pandas as pd, requests
+from binance.client import Client
 from datetime import datetime
+from sqlalchemy import create_engine
+import pandas_ta as ta
 
 class BinanceClient:
     def __init__(self):
-        self.api_key = os.getenv("API_KEY")
-        self.secret_key = os.getenv("SECRET_KEY")
-        self.db_url = os.getenv("DATABASE_URL")
-        self.base_url = 'https://testnet.binancefuture.com'
+        # 1. Credenciales desde Variables de Entorno (Railway)
+        self.api_key = os.getenv("BINANCE_API_KEY")
+        self.api_secret = os.getenv("BINANCE_API_SECRET")
+        self.client = Client(self.api_key, self.api_secret)
+        self.bot_token = os.getenv("TELEGRAM_TOKEN")
+        self.chat_id = os.getenv("TELEGRAM_CHAT_ID")
         
-        # Variables Telegram
-        self.tg_token = os.getenv("TELEGRAM_TOKEN")
-        self.tg_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-        if self.db_url:
-            if self.db_url.startswith("postgres://"):
-                self.db_url = self.db_url.replace("postgres://", "postgresql://", 1)
-            self._init_db()
-
-    def enviar_telegram(self, mensaje):
-        """Envía notificaciones a Telegram."""
-        if self.tg_token and self.tg_chat_id:
-            url = f"https://api.telegram.org/bot{self.tg_token}/sendMessage"
-            try:
-                requests.post(url, data={"chat_id": self.tg_chat_id, "text": mensaje, "parse_mode": "Markdown"}, timeout=5)
-            except: pass
-
-    def get_indicators(self, symbol="BTCUSDT"):
-        """Usa Kraken como fuente principal (la más estable para Railway)."""
+        # 2. Motor SQL Reforzado (SQLAlchemy)
+        # Esto soluciona el error de "UserWarning" y hace el historial más rápido
+        db_url = os.getenv("DATABASE_URL")
+        if db_url and db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        
         try:
-            res = requests.get("https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=15", timeout=4).json()
-            data = res['result']['XXBTZUSD']
-            df = pd.DataFrame(data)
-            closes = df[4].astype(float)
+            self.engine = create_engine(db_url)
+        except Exception as e:
+            print(f"⚠️ Error al crear motor SQL: {e}")
+
+    def get_indicators(self, symbol="BTCUSDT", interval="15m"):
+        """Calcula los sensores del Bot: RSI y EMA 20"""
+        try:
+            klines = self.client.get_klines(symbol=symbol, interval=interval, limit=100)
+            df = pd.DataFrame(klines, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'cts', 'qv', 'nt', 'tbv', 'tqv', 'i'])
+            df['c'] = df['c'].astype(float)
             
-            ema = closes.ewm(span=20, adjust=False).mean().iloc[-1]
-            delta = closes.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
-            return round(rsi, 2), round(ema, 2), closes.iloc[-1]
-        except:
-            return 0.0, 0.0, self.get_price(symbol)
-
-    def get_price(self, symbol="BTCUSDT"):
-        try:
-            r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=2).json()
-            return float(r['price'])
-        except: return 0.0
-
-    def set_leverage(self, symbol, leverage):
-        return self._request('POST', '/fapi/v1/leverage', {"symbol": symbol, "leverage": int(leverage)})
+            # Usamos pandas_ta para máxima precisión
+            rsi = ta.rsi(df['c'], length=14).iloc[-1]
+            ema = ta.ema(df['c'], length=20).iloc[-1]
+            precio = df['c'].iloc[-1]
+            
+            return rsi, ema, precio
+        except Exception as e:
+            print(f"❌ Error indicadores: {e}")
+            return 0, 0, 0
 
     def get_account_status(self):
-        res = self._request('GET', '/fapi/v2/account')
-        if isinstance(res, dict) and 'totalWalletBalance' in res:
-            return {"wallet": float(res['totalWalletBalance']), "unrealized_pnl": float(res['totalUnrealizedProfit']), "equity": float(res['totalMarginBalance'])}
-        return {"wallet": 0.0, "unrealized_pnl": 0.0, "equity": 0.0}
-
-    def _request(self, method, endpoint, params={}):
-        params['timestamp'] = int(time.time() * 1000)
-        query = "&".join([f"{k}={v}" for k, v in params.items()])
-        signature = hmac.new(self.secret_key.encode('utf-8'), query.encode('utf-8'), hashlib.sha256).hexdigest()
-        url = f"{self.base_url}{endpoint}?{query}&signature={signature}"
+        """Monitorea el dinero en la cuenta de Futuros"""
         try:
-            return requests.request(method, url, headers={'X-MBX-APIKEY': self.api_key}, timeout=10).json()
-        except: return {"error": "Error"}
-
-    def place_order(self, symbol, side, quantity):
-        return self._request('POST', '/fapi/v1/order', {"symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity})
+            acc = self.client.futures_account()
+            return {
+                "equity": float(acc['totalMarginBalance']),
+                "unrealized_pnl": float(acc['totalUnrealizedProfit'])
+            }
+        except Exception as e:
+            print(f"❌ Error cuenta: {e}")
+            return {"equity": 0.0, "unrealized_pnl": 0.0}
 
     def get_open_positions(self, symbol="BTCUSDT"):
-        data = self._request('GET', '/fapi/v2/account')
-        if isinstance(data, dict) and 'positions' in data:
-            for pos in data['positions']:
-                if pos.get('symbol') == symbol and float(pos.get('positionAmt', 0)) != 0: return pos
-        return None
+        """Detecta si hay una operación corriendo ahora mismo"""
+        try:
+            pos = self.client.futures_position_information(symbol=symbol)
+            for p in pos:
+                if float(p['positionAmt']) != 0:
+                    return p
+            return None
+        except Exception as e:
+            print(f"❌ Error posiciones: {e}")
+            return None
+
+    def place_order(self, symbol, side, amount):
+        """Envía la orden de compra o venta a Binance"""
+        try:
+            return self.client.futures_create_order(
+                symbol=symbol, 
+                side=side, 
+                type="MARKET", 
+                quantity=amount
+            )
+        except Exception as e:
+            self.enviar_telegram(f"⚠️ *FALLO DE ORDEN*\nError: `{e}`")
+            return None
 
     def registrar_trade(self, side, entry_p, exit_p, pnl):
+        """Guarda los resultados en la base de datos de Railway"""
         try:
-            # 1. Conexión a la base de datos de Railway
+            # Conexión directa para escritura rápida
             conn = psycopg2.connect(os.getenv("DATABASE_URL"))
             cur = conn.cursor()
             
-            # 2. Insertar el registro
             query = """
                 INSERT INTO trades (fecha, simbolo, lado, precio_entrada, precio_salida, pnl)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -91,32 +92,31 @@ class BinanceClient:
             valores = (datetime.now(), "BTCUSDT", side, entry_p, exit_p, pnl)
             
             cur.execute(query, valores)
-            conn.commit() # Confirmar guardado
+            conn.commit()
             
             cur.close()
             conn.close()
             return True
         except Exception as e:
-            print(f"❌ Error al guardar trade: {e}")
+            print(f"❌ Error al registrar en DB: {e}")
             return False
 
     def obtener_historial_db(self):
-        if not self.db_url: return None
+        """Carga los últimos 10 trades para mostrar en la terminal"""
         try:
-            conn = psycopg2.connect(self.db_url)
-            df = pd.read_sql("SELECT fecha, lado, entrada, salida, pnl FROM trades ORDER BY fecha DESC LIMIT 10", conn)
-            conn.close()
+            query = "SELECT fecha, lado, precio_entrada, precio_salida, pnl FROM trades ORDER BY fecha DESC LIMIT 10"
+            # Usamos SQLAlchemy para evitar avisos de Pandas
+            df = pd.read_sql(query, self.engine)
             return df
-        except: return None
+        except Exception as e:
+            print(f"❌ Error al leer historial: {e}")
+            return None
 
-    def _init_db(self):
+    def enviar_telegram(self, mensaje):
+        """El mensajero que te avisa al celular"""
         try:
-            conn = psycopg2.connect(self.db_url)
-            cur = conn.cursor()
-            cur.execute("CREATE TABLE IF NOT EXISTS trades (id SERIAL PRIMARY KEY, fecha TIMESTAMP, lado TEXT, entrada FLOAT, salida FLOAT, pnl FLOAT)")
-            conn.commit(); cur.close(); conn.close()
-        except: pass
-
-
-
-
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            data = {"chat_id": self.chat_id, "text": mensaje, "parse_mode": "Markdown"}
+            requests.post(url, data=data, timeout=5)
+        except Exception as e:
+            print(f"❌ Error Telegram: {e}")
