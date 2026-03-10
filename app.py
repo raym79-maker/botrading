@@ -160,26 +160,34 @@ else:
             client.enviar_telegram(f"📉 *AUTO SHORT EJECUTADO*\nPrecio: `${precio_actual:,.2f}`")
             st.session_state.ultima_alerta_vida = datetime.now() ; st.rerun()
 
-# --- 6. CONTROLES MANUALES ---
+# --- CONTROLES MANUALES ---
 st.divider()
-st.subheader("🕹️ Operación Manual")
+st.subheader("🕹️ Operativa Manual")
 col1, col2, col3 = st.columns(3)
-manual_qty = round((usdt_riesgo * lev) / precio_actual, 3) if precio_actual > 0 else 0
 
-if col1.button("🟢 COMPRAR (LONG) MANUAL", use_container_width=True):
-    client.place_order("BTCUSDT", "BUY", str(manual_qty))
-    client.enviar_telegram("🚀 *ORDEN MANUAL: LONG*")
-    st.rerun()
-if col2.button("🔴 VENDER (SHORT) MANUAL", use_container_width=True):
-    client.place_order("BTCUSDT", "SELL", str(manual_qty))
-    client.enviar_telegram("📉 *ORDEN MANUAL: SHORT*")
-    st.rerun()
-if col3.button("⛔ CERRAR POSICIÓN AHORA", use_container_width=True):
-    if posicion:
-        client.place_order("BTCUSDT", "SELL" if side == "LONG" else "BUY", str(tamano))
-        client.registrar_trade(side, entry_p, precio_actual, pnl if 'pnl' in locals() else 0)
-        client.enviar_telegram("⛔ *CIERRE MANUAL DE EMERGENCIA*")
-        st.rerun()
+# Calculamos la cantidad (Importante: Redondear a 3 decimales para BTC)
+if precio_actual > 0:
+    qty_m = round((usdt_riesgo * lev) / precio_actual, 3)
+else:
+    qty_m = 0
+
+if col1.button("🟢 COMPRAR (LONG)", use_container_width=True):
+    if qty_m > 0:
+        res = client.place_order("BTCUSDT", "BUY", str(qty_m))
+        if res:
+            st.success(f"🚀 Orden LONG enviada: {qty_m} BTC")
+            client.enviar_telegram(f"🚀 *ORDEN MANUAL:* LONG de `{qty_m} BTC` enviado.")
+            st.rerun()
+    else:
+        st.error("Cantidad inválida. Revisa el precio y el riesgo.")
+
+if col2.button("🔴 VENDER (SHORT)", use_container_width=True):
+    if qty_m > 0:
+        res = client.place_order("BTCUSDT", "SELL", str(qty_m))
+        if res:
+            st.success(f"📉 Orden SHORT enviada: {qty_m} BTC")
+            client.enviar_telegram(f"📉 *ORDEN MANUAL:* SHORT de `{qty_m} BTC` enviado.")
+            st.rerun()
 
 # --- 7. HEARTBEAT Y HISTORIAL ---
 if (datetime.now() - st.session_state.ultima_alerta_vida) > timedelta(hours=1):
