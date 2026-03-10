@@ -9,14 +9,12 @@ import pandas_ta as ta
 
 class BinanceClient:
     def __init__(self):
-        # 1. Variables de Entorno
         self.api_key = os.getenv("BINANCE_API_KEY")
         self.api_secret = os.getenv("BINANCE_API_SECRET")
         self.bot_token = os.getenv("TELEGRAM_TOKEN")
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID")
         self.is_testnet = os.getenv("IS_TESTNET", "False").lower() == "true"
         
-        # 2. Configuración de Base de Datos
         db_url = os.getenv("DATABASE_URL")
         if db_url and db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -26,26 +24,18 @@ class BinanceClient:
         except Exception as e:
             print(f"Error motor SQL: {e}")
 
-        # 3. Configuración de Proxy (Vital en Railway)
         proxy_url = os.getenv("PROXY_URL") 
         self.proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
 
-        # 4. Inicialización del Cliente
         try:
-            # Si el API Secret falta, aquí lanzará un error capturable
-            if not self.api_key or not self.api_secret:
-                self.client = None
-                print("❌ Faltan API Keys en las variables de entorno.")
-            else:
-                self.client = Client(
-                    self.api_key, 
-                    self.api_secret, 
-                    testnet=self.is_testnet,
-                    requests_params={'proxies': self.proxies, 'timeout': 20} if self.proxies else {'timeout': 20}
-                )
-                print(f"✅ Conectado a Binance {'TESTNET' if self.is_testnet else 'REAL'}")
+            self.client = Client(
+                self.api_key, 
+                self.api_secret, 
+                testnet=self.is_testnet,
+                requests_params={'proxies': self.proxies, 'timeout': 20} if self.proxies else {'timeout': 20}
+            )
         except Exception as e:
-            print(f"❌ Error de conexión: {e}")
+            print(f"Error de conexión: {e}")
             self.client = None
 
     def get_indicators(self, symbol="BTCUSDT", interval="15m"):
@@ -61,8 +51,8 @@ class BinanceClient:
             return 0, 0, 0
 
     def get_account_status(self):
-        if not self.client: 
-            return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "API Key o Secret no encontrados"}
+        if not self.client or not self.api_key or not self.api_secret: 
+            return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "Faltan API Keys"}
         try:
             acc = self.client.futures_account()
             return {
@@ -86,11 +76,9 @@ class BinanceClient:
     def place_order(self, symbol, side, amount):
         if not self.client: return None
         try:
-            return self.client.futures_create_order(
-                symbol=symbol, side=side, type="MARKET", quantity=str(amount)
-            )
+            return self.client.futures_create_order(symbol=symbol, side=side, type="MARKET", quantity=str(amount))
         except Exception as e:
-            print(f"Error en orden: {e}")
+            print(f"Error orden: {e}")
             return None
 
     def registrar_trade(self, side, entry_p, exit_p, pnl):
@@ -101,7 +89,7 @@ class BinanceClient:
                        VALUES (%s, %s, %s, %s, %s, %s)"""
             cur.execute(query, (datetime.now(), "BTCUSDT", side, entry_p, exit_p, pnl))
             conn.commit()
-            cur.close() ; conn.close()
+            cur.close(); conn.close()
             return True
         except:
             return False
