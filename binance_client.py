@@ -128,3 +128,4 @@ class BinanceClient:
             requests.post(url, data={"chat_id": self.chat_id, "text": mensaje, "parse_mode": "Markdown"})
         except:
             pass
+
