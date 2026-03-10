@@ -4,112 +4,113 @@ from datetime import datetime, timedelta
 import streamlit.components.v1 as components
 from binance_client import BinanceClient
 
-# ==========================================
-# 1. CONFIGURACIÓN Y CONEXIÓN
-# ==========================================
+# =========================================================
+# 1. CONFIGURACIÓN Y ESTILO DE LA INTERFAZ
+# =========================================================
 client = BinanceClient()
 rsi, ema, precio_actual = client.get_indicators()
 
-# Gestión de tendencia en pestaña
+# Gestión del título dinámico en la pestaña del navegador
 if 'precio_anterior' not in st.session_state:
     st.session_state.precio_anterior = precio_actual
 
-emoji_p = "🟢" if precio_actual >= st.session_state.precio_anterior else "🔴"
+emoji_web = "🟢" if precio_actual >= st.session_state.precio_anterior else "🔴"
 st.session_state.precio_anterior = precio_actual
 
 st.set_page_config(
-    page_title=f"{emoji_p} ${precio_actual:,.0f} | Terminal Pro",
+    page_title=f"{emoji_web} ${precio_actual:,.0f} | Terminal Pro",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Inicialización de estados persistentes
-if 'max_price' not in st.session_state: st.session_state.max_price = 0.0
-if 'ultima_alerta' not in st.session_state: st.session_state.ultima_alerta = datetime.now()
-if 'estado_actual' not in st.session_state: st.session_state.estado_actual = "NEUTRAL"
+# Inicialización de variables de estado de sesión
+if 'estado_actual' not in st.session_state: 
+    st.session_state.estado_actual = "NEUTRAL"
+if 'ultima_alerta_vida' not in st.session_state: 
+    st.session_state.ultima_alerta_vida = datetime.now()
 
-# Estilo visual para métricas
-st.markdown("""<style>
+# Estilo CSS para mejorar el contraste del Dashboard
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
     .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
-    </style>""", unsafe_allow_html=True)
+    div[data-testid="stMetricValue"] { color: #ffffff; }
+    </style>
+    """, unsafe_allow_html=True)
 
 st.title(f"🤖 Terminal Pro BTC - `${precio_actual:,.2f}`")
 
-# ==========================================
-# 2. PANEL LATERAL (SIDEBAR)
-# ==========================================
+# =========================================================
+# 2. PANEL LATERAL (SIDEBAR) - CUENTA Y RIESGO
+# =========================================================
 with st.sidebar:
     st.header("💰 Estado de Cuenta")
     acc = client.get_account_status()
     
     if acc.get('error'):
-        st.error(f"🚨 Error: {acc['error']}")
-        st.info("💡 Verifica BINANCE_API_SECRET e IS_TESTNET en Railway.")
+        st.error(f"🚨 Error API: {acc['error']}")
+        st.info("💡 Verifica tus API Keys y que IS_TESTNET coincida con tu cuenta.")
     else:
         st.metric("Balance Equity", f"{acc['equity']:,.2f} USDT", 
                   delta=f"{acc['unrealized_pnl']:,.2f} PNL")
-        st.success(f"🔗 Modo: {'DEMO' if client.is_testnet else 'REAL'}")
+        st.success(f"🔗 Conectado a: {'DEMO' if client.is_testnet else 'REAL'}")
 
     st.divider()
-    st.header("📡 Diagnóstico de Señal")
     
-    # Contador para reporte de Telegram (1h)
-    t_rest = timedelta(hours=1) - (datetime.now() - st.session_state.ultima_alerta)
-    st.info(f"⌛ Reporte en: **{int(max(0, t_rest.total_seconds() / 60))} min**")
-    
+    st.header("📡 Sensores de Mercado")
     dist_ema = abs(precio_actual - ema)
     nuevo_est = "NEUTRAL"
 
-    # Lógica de Semáforo RSI + EMA
+    # Lógica de Semáforo de Trading (Doble Filtro: RSI + EMA)
     if 35 < rsi < 55:
-        st.write(f"🟡 **Neutral ({rsi:.2f})**")
-        st.write(f"Distancia EMA: `${dist_ema:,.2f}`")
+        st.write(f"🟡 **Estado: Neutral ({rsi:.2f})**")
+        st.caption(f"Distancia EMA: `${dist_ema:,.2f}`")
     elif rsi <= 35:
         if precio_actual > ema:
             nuevo_est = "OPORTUNIDAD_LONG"
             st.success("🎯 **¡OPORTUNIDAD LONG!**")
         else:
             nuevo_est = "FILTRO_LONG"
-            st.warning("🔴 **Filtro: Bajo EMA**")
+            st.warning("🔴 **Filtro: Precio bajo EMA**")
     elif rsi >= 55:
         if precio_actual < ema:
             nuevo_est = "OPORTUNIDAD_SHORT"
             st.success("🎯 **¡OPORTUNIDAD SHORT!**")
         else:
             nuevo_est = "FILTRO_SHORT"
-            st.warning("🔴 **Filtro: Sobre EMA**")
+            st.warning("🔴 **Filtro: Precio sobre EMA**")
 
-    # Notificación por cambio de tendencia
+    # Notificación por Telegram si el estado cambia
     if nuevo_est != st.session_state.estado_actual:
-        client.enviar_telegram(f"📢 Cambio: {nuevo_est} | BTC: `${precio_actual:,.2f}`")
+        client.enviar_telegram(f"📢 *Cambio de Señal:* {nuevo_est}\nBTC: `${precio_actual:,.2f}` | RSI: `{rsi:.2f}`")
         st.session_state.estado_actual = nuevo_est
 
     st.divider()
     st.header("⚙️ Ajustes de Riesgo")
-    riesgo = st.number_input("Inversión USDT", value=50.0, step=10.0)
-    lev = st.slider("Apalancamiento", 1, 125, 20)
-    auto = st.toggle("🚀 MODO AUTOMÁTICO", value=True)
+    riesgo_usdt = st.number_input("Inversión USDT", value=50.0, step=10.0)
+    apalancamiento = st.slider("Apalancamiento (X)", 1, 125, 20)
+    auto_mode = st.toggle("🚀 MODO AUTO", value=True)
 
-# ==========================================
-# 3. GRÁFICO PROFESIONAL
-# ==========================================
-
+# =========================================================
+# 3. GRÁFICO PROFESIONAL DE TRADINGVIEW
+# =========================================================
 components.html(f"""
     <div style="height:480px;">
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
-          "autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15", "theme": "dark",
-          "container_id": "tv_chart", "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]
+          "autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15",
+          "theme": "dark", "style": "1", "locale": "es", "container_id": "tv_chart",
+          "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]
         }});
         </script>
         <div id="tv_chart"></div>
     </div>
     """, height=480)
 
-# ==========================================
-# 4. GESTIÓN DE POSICIÓN ACTIVA
-# ==========================================
+# =========================================================
+# 4. GESTIÓN DE POSICIONES (PNL Y ROI)
+# =========================================================
 pos = client.get_open_positions()
 
 if pos:
@@ -117,55 +118,57 @@ if pos:
     ent = float(pos['entryPrice'])
     tam = abs(float(pos['positionAmt']))
     
-    # Cálculo de PNL y ROI
-    pnl = (precio_actual - ent) * tam if lado == "LONG" else (ent - precio_actual) * tam
-    roi = (pnl / (ent * tam / lev)) * 100 if ent > 0 else 0
-    ind = "🟢" if pnl >= 0 else "🔴"
+    # Cálculo de PNL y ROI Porcentual
+    if lado == "LONG":
+        pnl_val = (precio_actual - ent) * tam
+    else:
+        pnl_val = (ent - precio_actual) * tam
+        
+    roi_val = (pnl_val / (ent * tam / apalancamiento)) * 100 if ent > 0 else 0
+    ind_color = "🟢" if pnl_val >= 0 else "🔴"
     
     st.warning(f"⚠️ **POSICIÓN {lado} ACTIVA**")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Entrada", f"${ent:,.2f}")
-    c2.metric("PNL", f"{ind} {pnl:.2f} USDT")
-    c3.metric("ROI", f"{roi:.2f}%")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Entrada", f"${ent:,.2f}")
+    m2.metric("PNL", f"{ind_color} {pnl_val:.2f} USDT")
+    m3.metric("ROI %", f"{roi_val:.2f}%")
     
-    if st.button("⛔ CERRAR POSICIÓN AHORA", use_container_width=True):
+    if st.button("⛔ CERRAR POSICIÓN TOTAL", use_container_width=True):
         client.place_order("BTCUSDT", "SELL" if lado == "LONG" else "BUY", str(tam))
-        client.registrar_trade(lado, ent, precio_actual, pnl)
+        client.registrar_trade(lado, ent, precio_actual, pnl_val)
         st.rerun()
 else:
-    # Controles manuales si no hay trade abierto
-    st.info("🔎 Buscando entradas... Operar manualmente:")
+    # Controles manuales si no hay posición
+    st.info("🔎 **Mercado sin posiciones.** Operar manualmente:")
     cm1, cm2 = st.columns(2)
-    qty_m = round((riesgo * lev) / precio_actual, 3) if precio_actual > 0 else 0
+    qty_manual = round((riesgo_usdt * apalancamiento) / precio_actual, 3) if precio_actual > 0 else 0
     
     if cm1.button("🟢 ABRIR LONG MANUAL", use_container_width=True):
-        if qty_m > 0:
-            client.place_order("BTCUSDT", "BUY", qty_m)
-            st.rerun()
-    
+        client.place_order("BTCUSDT", "BUY", qty_manual)
+        st.rerun()
     if cm2.button("🔴 ABRIR SHORT MANUAL", use_container_width=True):
-        if qty_m > 0:
-            client.place_order("BTCUSDT", "SELL", qty_m)
-            st.rerun()
+        client.place_order("BTCUSDT", "SELL", qty_manual)
+        st.rerun()
 
-# ==========================================
-# 5. HISTORIAL DE POSTGRESQL
-# ==========================================
+# =========================================================
+# 5. HISTORIAL DE TRADES (POSTGRESQL)
+# =========================================================
 st.divider()
 st.subheader("📋 Historial de Operaciones")
-df_h = client.obtener_historial_db()
+df_hist = client.obtener_historial_db()
 
-if df_h is not None and not df_h.empty:
-    st.table(df_h)
+if df_hist is not None and not df_hist.empty:
+    st.table(df_hist)
 else:
-    st.write("Esperando el primer trade para mostrar el historial...")
+    st.caption("Buscando registros en PostgreSQL...")
 
-# ==========================================
-# 6. HEARTBEAT Y REFRESCO
-# ==========================================
-if (datetime.now() - st.session_state.ultima_alerta) > timedelta(hours=1):
-    client.enviar_telegram(f"💓 Bot Activo | BTC: `${precio_actual:,.2f}`")
-    st.session_state.ultima_alerta = datetime.now()
+# =========================================================
+# 6. HEARTBEAT Y AUTO-REFRESCO
+# =========================================================
+if (datetime.now() - st.session_state.ultima_alerta_vida) > timedelta(hours=1):
+    client.enviar_telegram(f"💓 *Terminal Activa:* BTC `${precio_actual:,.2f}`")
+    st.session_state.ultima_alerta_vida = datetime.now()
 
+# Bucle de refresco cada 10 segundos
 time.sleep(10)
 st.rerun()
