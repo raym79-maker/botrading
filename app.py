@@ -1,122 +1,221 @@
-import os
-import psycopg2
-import pandas as pd
-import requests
-from binance.client import Client
-from datetime import datetime
-from sqlalchemy import create_engine
-import pandas_ta as ta
+import streamlit as st
+import time, os
+from datetime import datetime, timedelta
+import streamlit.components.v1 as components
+from binance_client import BinanceClient
 
-class BinanceClient:
-    def __init__(self):
-        # 1. Carga de Variables de Entorno
-        self.api_key = os.getenv("BINANCE_API_KEY")
-        self.api_secret = os.getenv("BINANCE_API_SECRET")
-        self.bot_token = os.getenv("TELEGRAM_TOKEN")
-        self.chat_id = os.getenv("TELEGRAM_CHAT_ID")
-        self.is_testnet = os.getenv("IS_TESTNET", "False").lower() == "true"
+# ==============================================================================
+# 1. CONFIGURACIÓN INICIAL DE LA PÁGINA
+# ==============================================================================
+# Inicializamos el cliente de Binance primero para obtener datos
+client = BinanceClient()
+rsi, ema, precio_actual = client.get_indicators()
+
+# Gestión del título dinámico y emoji según tendencia del precio
+if 'precio_anterior' not in st.session_state:
+    st.session_state.precio_anterior = precio_actual
+
+emoji_web = "🟢" if precio_actual >= st.session_state.precio_anterior else "🔴"
+st.session_state.precio_anterior = precio_actual
+
+st.set_page_config(
+    page_title=f"{emoji_web} ${precio_actual:,.0f} | Terminal de Trading",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ==============================================================================
+# 2. INICIALIZACIÓN DE ESTADOS DE SESIÓN (PERSISTENCIA)
+# ==============================================================================
+# Memoria para el seguimiento del precio máximo (Trailing Stop)
+if 'max_price' not in st.session_state: 
+    st.session_state.max_price = 0.0
+
+# Seguimiento del último reporte de actividad (Heartbeat)
+if 'ultima_alerta_vida' not in st.session_state: 
+    st.session_state.ultima_alerta_vida = datetime.now()
+
+# Registro del último estado de señal enviado para evitar spam en Telegram
+if 'estado_actual' not in st.session_state: 
+    st.session_state.estado_actual = "NEUTRAL"
+
+# Diseño CSS personalizado para el modo oscuro
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
+    div[data-testid="stMetricValue"] { color: #ffffff; }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title(f"🤖 Terminal de Control Pro - BTC: `${precio_actual:,.2f}`")
+
+# ==============================================================================
+# 3. PANEL LATERAL (SIDEBAR): FINANZAS Y CONFIGURACIÓN
+# ==============================================================================
+with st.sidebar:
+    st.header("💰 Estado Financiero")
+    
+    # Intentamos obtener balance y capturar errores de API
+    acc_data = client.get_account_status()
+    
+    if acc_data.get('error'):
+        st.error(f"🚨 Error de Conexión: {acc_data['error']}")
+        st.metric("Balance Equity", "0.00 USDT", delta="OFFLINE")
+    else:
+        st.metric(
+            "Balance Equity", 
+            f"{acc_data['equity']:,.2f} USDT", 
+            delta=f"{acc_data['unrealized_pnl']:,.2f} PNL"
+        )
+        st.success(f"🔗 Conectado: {'DEMO' if client.is_testnet else 'REAL'}")
+
+    st.divider()
+    
+    # --- DIAGNÓSTICO DE SEÑALES ---
+    st.header("📡 Sensores de Mercado")
+    
+    # Cálculo del contador de reporte de vida (1 hora)
+    t_restante = timedelta(hours=1) - (datetime.now() - st.session_state.ultima_alerta_vida)
+    minutos_faltantes = int(max(0, t_restante.total_seconds() / 60))
+    st.info(f"⌛ Reporte de vida en: **{minutos_faltantes} min**")
+    
+    # Lógica de Semáforo de Trading (RSI + EMA 20)
+    distancia_ema = abs(precio_actual - ema)
+    estado_senal = "NEUTRAL"
+
+    if 35 < rsi < 55:
+        st.write(f"🟡 **Estado: Neutral ({rsi:.2f})**")
+        st.write(f"Distancia a la EMA: `${distancia_ema:,.2f}`")
+    elif rsi <= 35:
+        if precio_actual > ema:
+            estado_senal = "OPORTUNIDAD_LONG"
+            st.success("🎯 **¡OPORTUNIDAD LONG!**")
+            st.write(f"Precio sobre EMA por `${distancia_ema:,.2f}`")
+        else:
+            estado_senal = "FILTRO_LONG"
+            st.warning("🔴 **Filtro EMA (Debajo)**")
+            st.write(f"Esperando cruce alcista... Dist: `${distancia_ema:,.2f}`")
+    elif rsi >= 55:
+        if precio_actual < ema:
+            estado_senal = "OPORTUNIDAD_SHORT"
+            st.success("🎯 **¡OPORTUNIDAD SHORT!**")
+            st.write(f"Precio bajo EMA por `${distancia_ema:,.2f}`")
+        else:
+            estado_senal = "FILTRO_SHORT"
+            st.warning("🔴 **Filtro EMA (Arriba)**")
+            st.write(f"Esperando cruce bajista... Dist: `${distancia_ema:,.2f}`")
+
+    # Si la señal cambió, notificamos por Telegram
+    if estado_senal != st.session_state.estado_actual:
+        client.enviar_telegram(f"📢 *Cambio de Señal:* {estado_senal}\nBTC: `${precio_actual:,.2f}` | RSI: `{rsi:.2f}`")
+        st.session_state.estado_actual = estado_senal
+
+    st.divider()
+    
+    # --- AJUSTES DE RIESGO ---
+    st.header("⚙️ Gestión de Riesgo")
+    monto_riesgo = st.number_input("Inversión USDT", value=50.0, step=10.0)
+    apalancamiento = st.slider("Apalancamiento (X)", 1, 125, 20)
+    
+    st.subheader("🛡️ Salidas")
+    take_profit_manual = st.number_input("TP (Precio Fijo)", value=0.0)
+    stop_loss_manual = st.number_input("SL (Precio Fijo)", value=0.0)
+    
+    auto_trading = st.toggle("🚀 OPERACIÓN AUTOMÁTICA", value=True)
+
+# ==============================================================================
+# 4. CUERPO PRINCIPAL: GRÁFICO PROFESIONAL
+# ==============================================================================
+[Image of a cryptocurrency technical analysis chart with RSI and EMA indicators showing entry and exit zones]
+
+components.html(f"""
+    <div style="height:480px;">
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "autosize": true, "symbol": "BINANCE:BTCUSDT", "interval": "15",
+          "theme": "dark", "style": "1", "locale": "es", "toolbar_bg": "#f1f3f6",
+          "enable_publishing": false, "hide_side_toolbar": false, "allow_symbol_change": true,
+          "container_id": "tv_chart", "studies": ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"]
+        }});
+        </script>
+        <div id="tv_chart"></div>
+    </div>
+    """, height=480)
+
+# ==============================================================================
+# 5. GESTIÓN DE POSICIONES ACTIVAS (PNL Y ROI)
+# ==============================================================================
+posicion_actual = client.get_open_positions()
+
+if posicion_actual:
+    lado_pos = "LONG" if float(posicion_actual['positionAmt']) > 0 else "SHORT"
+    precio_entrada = float(posicion_actual['entryPrice'])
+    tamano_pos = abs(float(posicion_actual['positionAmt']))
+    
+    # Cálculo de PNL y ROI Real
+    if lado_pos == "LONG":
+        pnl_no_realizado = (precio_actual - precio_entrada) * tamano_pos
+    else:
+        pnl_no_realizado = (precio_entrada - precio_actual) * tamano_pos
         
-        # 2. Configuración de Base de Datos (PostgreSQL)
-        db_url = os.getenv("DATABASE_URL")
-        if db_url and db_url.startswith("postgres://"):
-            db_url = db_url.replace("postgres://", "postgresql://", 1)
-        
-        try:
-            self.engine = create_engine(db_url)
-        except Exception as e:
-            print(f"⚠️ Error motor SQL: {e}")
+    roi_porcentual = (pnl_no_realizado / (precio_entrada * tamano_pos / apalancamiento)) * 100 if precio_entrada > 0 else 0
+    indicador_color = "🟢" if pnl_no_realizado >= 0 else "🔴"
+    
+    st.warning(f"⚠️ **POSICIÓN {lado_pos} EN CURSO**")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Entrada", f"${precio_entrada:,.2f}")
+    m2.metric("PNL USDT", f"{indicador_color} {pnl_no_realizado:.2f}")
+    m3.metric("ROI", f"{roi_porcentual:.2f}%")
 
-        # 3. Configuración de Proxy (Crucial para saltar el bloqueo de Railway)
-        proxy_url = os.getenv("PROXY_URL") 
-        self.proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
+    # Botón de cierre inmediato
+    if st.button("⛔ CERRAR POSICIÓN TOTAL", use_container_width=True):
+        client.place_order("BTCUSDT", "SELL" if lado_pos == "LONG" else "BUY", str(tamano_pos))
+        client.registrar_trade(lado_pos, precio_entrada, precio_actual, pnl_no_realizado)
+        st.rerun()
 
-        # 4. Inicialización del Cliente de Binance
-        try:
-            self.client = Client(
-                self.api_key, 
-                self.api_secret, 
-                testnet=self.is_testnet,
-                requests_params={'proxies': self.proxies, 'timeout': 20} if self.proxies else {'timeout': 20}
-            )
-            print(f"✅ Conectado a Binance {'TESTNET' (Demo) if self.is_testnet else 'REAL'}")
-        except Exception as e:
-            print(f"❌ Fallo crítico de conexión: {e}")
-            self.client = None
+    # Lógica de cierre por TP/SL manual del Sidebar
+    if (lado_pos == "LONG" and ((take_profit_manual > 0 and precio_actual >= take_profit_manual) or (stop_loss_manual > 0 and precio_actual <= stop_loss_manual))) or \
+       (lado_pos == "SHORT" and ((take_profit_manual > 0 and precio_actual <= take_profit_manual) or (stop_loss_manual > 0 and precio_actual >= stop_loss_manual))):
+        client.place_order("BTCUSDT", "SELL" if lado_pos == "LONG" else "BUY", str(tamano_pos))
+        client.registrar_trade(lado_pos, precio_entrada, precio_actual, pnl_no_realizado)
+        client.enviar_telegram(f"🎯 *CIERRE POR LÍMITE:* PNL `{pnl_no_realizado:.2f} USDT`")
+        st.rerun()
+else:
+    # --- CONTROLES MANUALES (SÓLO SI NO HAY POSICIÓN) ---
+    st.info("🔎 **Sin posiciones detectadas.** Operar manualmente:")
+    c_manual1, c_manual2 = st.columns(2)
+    qty_calculada = round((monto_riesgo * apalancamiento) / precio_actual, 3) if precio_actual > 0 else 0
+    
+    if c_manual1.button("🟢 COMPRAR (LONG) MANUAL", use_container_width=True):
+        res = client.place_order("BTCUSDT", "BUY", str(qty_calculada))
+        if res: st.success("Orden enviada"); st.rerun()
+    
+    if c_manual2.button("🔴 VENDER (SHORT) MANUAL", use_container_width=True):
+        res = client.place_order("BTCUSDT", "SELL", str(qty_calculada))
+        if res: st.success("Orden enviada"); st.rerun()
 
-    def get_indicators(self, symbol="BTCUSDT", interval="15m"):
-        """Calcula RSI y EMA 20 con datos actuales"""
-        if not self.client: return 0, 0, 0
-        try:
-            klines = self.client.get_klines(symbol=symbol, interval=interval, limit=100)
-            df = pd.DataFrame(klines, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'cts', 'qv', 'nt', 'tbv', 'tqv', 'i'])
-            df['c'] = df['c'].astype(float)
-            rsi = ta.rsi(df['c'], length=14).iloc[-1]
-            ema = ta.ema(df['c'], length=20).iloc[-1]
-            return rsi, ema, df['c'].iloc[-1]
-        except Exception as e:
-            print(f"⚠️ Error indicadores: {e}")
-            return 0, 0, 0
+# ==============================================================================
+# 6. HISTORIAL DE TRADES (POSTGRESQL)
+# ==============================================================================
+st.divider()
+st.subheader("📋 Historial Reciente de Operaciones")
+df_historial = client.obtener_historial_db()
 
-    def get_account_status(self):
-        """Obtiene el Balance y PNL de Futuros"""
-        if not self.client: return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "Sin cliente"}
-        try:
-            acc = self.client.futures_account()
-            return {
-                "equity": float(acc['totalMarginBalance']),
-                "unrealized_pnl": float(acc['totalUnrealizedProfit']),
-                "error": None
-            }
-        except Exception as e:
-            print(f"🚨 Error de balance: {e}")
-            return {"equity": 0.0, "unrealized_pnl": 0.0, "error": str(e)}
+if df_historial is not None and not df_historial.empty:
+    st.table(df_historial)
+else:
+    st.write("Conectando con PostgreSQL para cargar el historial...")
 
-    def get_open_positions(self, symbol="BTCUSDT"):
-        """Busca si hay alguna posición activa"""
-        if not self.client: return None
-        try:
-            pos = self.client.futures_position_information(symbol=symbol)
-            for p in pos:
-                if float(p['positionAmt']) != 0: return p
-            return None
-        except: return None
+# ==============================================================================
+# 7. HEARTBEAT Y CICLO DE REFRESCO
+# ==============================================================================
+# Si pasa una hora, enviamos reporte de vida a Telegram
+if (datetime.now() - st.session_state.ultima_alerta_vida) > timedelta(hours=1):
+    client.enviar_telegram(f"💓 *CENTINELA:* BTC `${precio_actual:,.2f}` | RSI `{rsi:.2f}`")
+    st.session_state.ultima_alerta_vida = datetime.now()
 
-    def place_order(self, symbol, side, amount):
-        """Ejecuta órdenes de mercado en Binance Futuros"""
-        if not self.client: return None
-        try:
-            order = self.client.futures_create_order(
-                symbol=symbol, side=side, type="MARKET", quantity=str(amount)
-            )
-            print(f"✅ Orden {side} ejecutada con éxito.")
-            return order
-        except Exception as e:
-            print(f"🚨 Error en orden: {e}")
-            return None
-
-    def registrar_trade(self, side, entry_p, exit_p, pnl):
-        """Guarda trades en PostgreSQL"""
-        try:
-            conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-            cur = conn.cursor()
-            query = """INSERT INTO trades (fecha, simbolo, lado, precio_entrada, precio_salida, pnl) 
-                       VALUES (%s, %s, %s, %s, %s, %s)"""
-            cur.execute(query, (datetime.now(), "BTCUSDT", side, entry_p, exit_p, pnl))
-            conn.commit()
-            cur.close() ; conn.close()
-            return True
-        except: return False
-
-    def obtener_historial_db(self):
-        """Carga los trades usando SQLAlchemy"""
-        try:
-            query = "SELECT fecha, lado, precio_entrada, precio_salida, pnl FROM trades ORDER BY fecha DESC LIMIT 10"
-            return pd.read_sql(query, self.engine)
-        except: return None
-
-    def enviar_telegram(self, mensaje):
-        """Notificaciones"""
-        try:
-            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-            requests.post(url, data={"chat_id": self.chat_id, "text": mensaje, "parse_mode": "Markdown"})
-        except: pass
+# Refresco automático cada 10 segundos para no saturar la API
+time.sleep(10)
+st.rer
