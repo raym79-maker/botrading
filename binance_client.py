@@ -9,11 +9,13 @@ import pandas_ta as ta
 
 class BinanceClient:
     def __init__(self):
-        # 1. Carga de Variables
+        # 1. Carga de Variables desde Railway
         self.api_key = os.getenv("BINANCE_API_KEY")
         self.api_secret = os.getenv("BINANCE_API_SECRET")
         self.bot_token = os.getenv("TELEGRAM_TOKEN")
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        
+        # Modo Testnet (True para cuenta Demo)
         self.is_testnet = os.getenv("IS_TESTNET", "False").lower() == "true"
         
         # 2. Configuración de Base de Datos
@@ -26,7 +28,7 @@ class BinanceClient:
         except Exception as e:
             print(f"Error motor SQL: {e}")
 
-        # 3. Configuración de Proxy (Vital en Railway)
+        # 3. Configuración de Proxy (Crucial para Railway)
         proxy_url = os.getenv("PROXY_URL") 
         self.proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
 
@@ -34,12 +36,10 @@ class BinanceClient:
         try:
             if not self.api_key or not self.api_secret:
                 self.client = None
-                print("❌ Faltan credenciales API en el Dashboard.")
+                print("❌ Credenciales API no detectadas.")
             else:
                 self.client = Client(
-                    self.api_key, 
-                    self.api_secret, 
-                    testnet=self.is_testnet,
+                    self.api_key, self.api_secret, testnet=self.is_testnet,
                     requests_params={'proxies': self.proxies, 'timeout': 20} if self.proxies else {'timeout': 20}
                 )
                 print(f"✅ Conectado a Binance {'TESTNET' if self.is_testnet else 'REAL'}")
@@ -56,12 +56,10 @@ class BinanceClient:
             rsi = ta.rsi(df['c'], length=14).iloc[-1]
             ema = ta.ema(df['c'], length=20).iloc[-1]
             return rsi, ema, df['c'].iloc[-1]
-        except:
-            return 0, 0, 0
+        except: return 0, 0, 0
 
     def get_account_status(self):
-        if not self.client: 
-            return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "Credenciales API faltantes en Variables de Railway"}
+        if not self.client: return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "Credenciales API faltantes"}
         try:
             acc = self.client.futures_account()
             return {
@@ -79,8 +77,7 @@ class BinanceClient:
             for p in pos:
                 if float(p['positionAmt']) != 0: return p
             return None
-        except:
-            return None
+        except: return None
 
     def place_order(self, symbol, side, amount):
         if not self.client: return None
@@ -102,19 +99,16 @@ class BinanceClient:
             conn.commit()
             cur.close() ; conn.close()
             return True
-        except:
-            return False
+        except: return False
 
     def obtener_historial_db(self):
         try:
             query = "SELECT fecha, lado, precio_entrada, precio_salida, pnl FROM trades ORDER BY fecha DESC LIMIT 10"
             return pd.read_sql(query, self.engine)
-        except:
-            return None
+        except: return None
 
     def enviar_telegram(self, mensaje):
         try:
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             requests.post(url, data={"chat_id": self.chat_id, "text": mensaje, "parse_mode": "Markdown"})
-        except:
-            pass
+        except: pass
