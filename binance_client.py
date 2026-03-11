@@ -26,7 +26,7 @@ class BinanceClient:
         except Exception as e:
             print(f"Error motor SQL: {e}")
 
-        # 3. Proxy (Vital en Railway)
+        # 3. Configuración de Proxy (Vital en Railway)
         proxy_url = os.getenv("PROXY_URL") 
         self.proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
 
@@ -34,7 +34,7 @@ class BinanceClient:
         try:
             if not self.api_key or not self.api_secret:
                 self.client = None
-                print("❌ Faltan credenciales API en las variables de entorno.")
+                print("❌ Faltan credenciales API en el Dashboard.")
             else:
                 self.client = Client(
                     self.api_key, 
@@ -61,7 +61,7 @@ class BinanceClient:
 
     def get_account_status(self):
         if not self.client: 
-            return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "Credenciales API faltantes"}
+            return {"equity": 0.0, "unrealized_pnl": 0.0, "error": "Credenciales API faltantes en Variables de Railway"}
         try:
             acc = self.client.futures_account()
             return {
@@ -89,7 +89,7 @@ class BinanceClient:
                 symbol=symbol, side=side, type="MARKET", quantity=str(amount)
             )
         except Exception as e:
-            print(f"Error en orden: {e}")
+            print(f"Error orden: {e}")
             return None
 
     def registrar_trade(self, side, entry_p, exit_p, pnl):
