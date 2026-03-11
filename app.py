@@ -14,12 +14,12 @@ if 'precio_anterior' not in st.session_state:
 emoji_p = "🟢" if precio_actual >= st.session_state.precio_anterior else "🔴"
 st.session_state.precio_anterior = precio_actual
 
-st.set_page_config(page_title=f"{emoji_p} ${precio_actual:,.0f} | Terminal Pro", layout="wide")
+st.set_page_config(page_title=f"{emoji_p} ${precio_actual:,.0f} | Pro", layout="wide")
 
 if 'estado_actual' not in st.session_state: st.session_state.estado_actual = "NEUTRAL"
 if 'ultima_alerta' not in st.session_state: st.session_state.ultima_alerta = datetime.now()
 
-st.title(f"🤖 Terminal Pro BTC - `${precio_actual:,.2f}`")
+st.title(f"🤖 Terminal de Control BTC - `${precio_actual:,.2f}`")
 
 # --- 2. SIDEBAR ---
 with st.sidebar:
@@ -37,9 +37,15 @@ with st.sidebar:
     if 35 < rsi < 55:
         st.write(f"🟡 RSI Neutral ({rsi:.2f})")
     elif rsi <= 35:
-        st.success("🎯 OPORTUNIDAD LONG") if precio_actual > ema else st.warning("🔴 Filtro: Bajo la EMA")
+        if precio_actual > ema:
+            st.success("🎯 OPORTUNIDAD LONG")
+        else:
+            st.warning("🔴 Filtro: Bajo la EMA")
     elif rsi >= 55:
-        st.success("🎯 OPORTUNIDAD SHORT") if precio_actual < ema else st.warning("🔴 Sobre la EMA")
+        if precio_actual < ema:
+            st.success("🎯 OPORTUNIDAD SHORT")
+        else:
+            st.warning("🔴 Filtro: Sobre la EMA")
 
     st.divider()
     st.header("⚙️ Ajustes de Riesgo")
