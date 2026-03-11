@@ -14,19 +14,24 @@ if 'precio_anterior' not in st.session_state:
 emoji_p = "🟢" if precio_actual >= st.session_state.precio_anterior else "🔴"
 st.session_state.precio_anterior = precio_actual
 
-st.set_page_config(page_title=f"{emoji_p} ${precio_actual:,.0f} | Pro", layout="wide")
+st.set_page_config(
+    page_title=f"{emoji_p} ${precio_actual:,.0f} | Terminal Pro",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 if 'estado_actual' not in st.session_state: st.session_state.estado_actual = "NEUTRAL"
 if 'ultima_alerta' not in st.session_state: st.session_state.ultima_alerta = datetime.now()
 
-st.title(f"🤖 Terminal de Control BTC - `${precio_actual:,.2f}`")
+st.title(f"🤖 Terminal Pro BTC - `${precio_actual:,.2f}`")
 
-# --- 2. SIDEBAR ---
+# --- 2. SIDEBAR (BALANCE Y RIESGO) ---
 with st.sidebar:
     st.header("💰 Estado de Cuenta")
     acc = client.get_account_status()
     if acc['error']:
         st.error(f"🚨 {acc['error']}")
+        st.info("💡 Ve a Variables en Railway y pega BINANCE_API_SECRET.")
     else:
         st.metric("Balance Equity", f"{acc['equity']:,.2f} USDT", delta=f"{acc['unrealized_pnl']:,.2f} PNL")
         st.success(f"Modo: {'DEMO' if client.is_testnet else 'REAL'}")
@@ -55,7 +60,7 @@ with st.sidebar:
 
 # --- 3. GRÁFICO TRADINGVIEW ---
 components.html(f"""
-    <div style="height:450px;">
+    <div style="height:480px;">
         <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         <script type="text/javascript">
         new TradingView.widget({{
@@ -64,7 +69,7 @@ components.html(f"""
         }});
         </script><div id="tv_chart"></div>
     </div>
-    """, height=450)
+    """, height=480)
 
 # --- 4. GESTIÓN DE POSICIÓN ---
 pos = client.get_open_positions()
@@ -78,31 +83,38 @@ if pos:
     
     st.warning(f"⚠️ POSICIÓN {lado} ACTIVA")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Entrada", f"${ent:,.2f}")
-    c2.metric("PNL", f"{pnl:.2f} USDT")
-    c3.metric("ROI", f"{roi:.2f}%")
+    c1.metric("Precio Entrada", f"${ent:,.2f}")
+    c2.metric("PNL Actual", f"{pnl:.2f} USDT")
+    c3.metric("ROI Real", f"{roi:.2f}%")
     
     if st.button("⛔ CERRAR POSICIÓN AHORA", use_container_width=True):
         client.place_order("BTCUSDT", "SELL" if lado == "LONG" else "BUY", str(tam))
         client.registrar_trade(lado, ent, precio_actual, pnl)
         st.rerun()
 else:
-    st.info("🔎 Sin posiciones. Abrir manual:")
+    st.info("🔎 No hay posiciones abiertas. Operar manualmente:")
     cm1, cm2 = st.columns(2)
     qty = round((riesgo * lev) / precio_actual, 3) if precio_actual > 0 else 0
     
     if cm1.button("🟢 ABRIR LONG MANUAL", use_container_width=True):
-        client.place_order("BTCUSDT", "BUY", qty) ; st.rerun()
+        if qty > 0:
+            client.place_order("BTCUSDT", "BUY", qty)
+            st.rerun()
+    
     if cm2.button("🔴 ABRIR SHORT MANUAL", use_container_width=True):
-        client.place_order("BTCUSDT", "SELL", qty) ; st.rerun()
+        if qty > 0:
+            client.place_order("BTCUSDT", "SELL", qty)
+            st.rerun()
 
-# --- 5. HISTORIAL ---
+# --- 5. HISTORIAL DE TRADES ---
 st.divider()
-st.subheader("📋 Historial de Operaciones")
+st.subheader("📋 Historial de PostgreSQL")
 df_h = client.obtener_historial_db()
 if df_h is not None and not df_h.empty:
     st.table(df_h)
 else:
-    st.write("Sin registros en PostgreSQL.")
+    st.write("Esperando registros en la base de datos...")
 
-time.sleep(10) ; st.rerun()
+# Refresco automático cada 10 segundos
+time.sleep(10)
+st.rerun()
